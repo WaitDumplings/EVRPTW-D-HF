@@ -206,3 +206,10 @@ def test_portable_solver_file_relocation_reencoding_and_raw_output(tmp_path):
     with pytest.raises(ValueError, match="already published"):
         write_instance(path, task, {**binding, "cle_manifest_sha256": "f" * 64})
     assert path.read_bytes() == before
+
+    # Both files are internally valid; only the EV fastest-time matrix differs.
+    matrices["fastest_time_s"][0, 1] += 1
+    np.savez(meta.parent / "costs.npz", **matrices)
+    write(meta, {**read(meta), "matrix_hashes": array_hashes(matrices, 4)})
+    with pytest.raises(ValueError, match="Restored and portable"):
+        verify_instance(path, meta.parent)

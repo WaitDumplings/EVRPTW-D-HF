@@ -9,25 +9,30 @@ from pathlib import Path
 
 from evrptw_scenarios.cle_binding import cle_authority
 from export_instance import source_info
-from instance_file import file_header, read_instance, unpack, write_instance
+from instance_file import (
+    file_header,
+    read_instance,
+    read_portable,
+    unpack,
+    write_instance,
+)
 from solver_parquet import PROBLEMS, from_restored, partition
 from stage2.common import CITIES, lock, read, sha, shared_identity, write
 
-RECEIPTS = ("cle_manifest.json", "stage1_validation.json", "public_authority.json")
-
 
 def city_inventory(base, shared, city):
-    manifest = read(base / RECEIPTS[0])
+    manifest = read(base / "cle_manifest.json")
     if manifest["city_slug"] != city or not (base / "public_authority.json").is_file():
         raise ValueError(f"Expected an accepted public-source Stage 1 CLE for {city}")
-    authority, validation = cle_authority(base, manifest)
+    authority, _ = cle_authority(base, manifest)
     receipt = read(authority)
+    authority_hash = sha(authority)
     meta = read(shared / "shared.json")
     if (
         meta["city"] != city
-        or meta["source"]["cle"] != sha(base / RECEIPTS[0])
-        or meta["source"]["cohort"] != sha(authority)
-        or meta["source"]["validation"] != sha(validation)
+        or meta["source"]["cle"] != receipt["cle_manifest_sha256"]
+        or meta["source"]["cohort"] != authority_hash
+        or meta["source"]["validation"] != receipt["validation_sha256"]
         or meta["calibration"] != receipt["calibration_sha256"]
         or meta["vintage"] != receipt["inputs_sha256"]
     ):
@@ -35,7 +40,13 @@ def city_inventory(base, shared, city):
             f"Stage 1 receipt and solver shared assets do not match for {city}"
         )
     files = {name: item["sha256"] for name, item in manifest["files"].items()}
-    files.update({name: sha(base / name) for name in RECEIPTS})
+    files.update(
+        {
+            "cle_manifest.json": receipt["cle_manifest_sha256"],
+            "stage1_validation.json": receipt["validation_sha256"],
+            "public_authority.json": authority_hash,
+        }
+    )
     shared_files = {**meta["files"], "shared.json": sha(shared / "shared.json")}
     inventory = {}
     for root, prefix, entries in (
@@ -93,32 +104,28 @@ def publish_city(work, output, city):
 
 
 def publish_instance(source, output):
-    info = source_info(source)
-    if info["city"] not in CITIES or not re.fullmatch(
-        r"[A-Za-z0-9_-]+", info["instance_id"]
-    ):
-        raise ValueError("Invalid city or instance identifier")
-    split, city, scale = partition(info).parts
-    city_dir = output / "CLE" / city
-    binding = verify_city(city_dir, city, full=False)
-    target = (
-        output / "instances" / city / split / scale / (info["instance_id"] + ".parquet")
-    )
+    expected = None
     if source.is_dir():
         task = from_restored(source)
     elif source.suffix == ".parquet":
-        if file_header(source)["payload"]["cle"] != binding:
-            raise ValueError("Different CLE or shared version")
-        task = read_instance(source)
+        header, task = read_portable(source)
+        expected = header["payload"]["cle"]
     else:
         from stage2.generate import restore
 
+        city = source_info(source)["city"]
+        if city not in CITIES:
+            raise ValueError("Unknown archive city")
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "restored"
-            restore(source, city_dir / "shared", folder)
+            restore(source, output / "CLE" / city / "shared", folder)
             task = from_restored(folder)
-    if any(task.info[k] != info[k] for k in info):
-        raise ValueError("Instance identity changed during export")
+    split, city, scale = partition(task.info).parts
+    name = task.info["instance_id"]
+    if city not in CITIES or not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        raise ValueError("Invalid city or instance identifier")
+    binding = verify_city(output / "CLE" / city, city, expected=expected, full=False)
+    target = output / "instances" / city / split / scale / (name + ".parquet")
     return write_instance(target, task, binding)
 
 
@@ -161,15 +168,13 @@ def plot_instance(file, output, dest):
 
 def verify_instance(path, restored):
     source = from_restored(restored)
+    portable = read_instance(path)
+    # Both readers verify the four matrix digests and the ordered node table.
+    if source.info != portable.info or not source.nodes.equals(portable.nodes):
+        raise ValueError("Restored and portable instance inputs differ")
     result = {}
     for problem in PROBLEMS:
-        expected = source.view(problem)
-        delivered = read_instance(path, problem)
-        if expected.info != delivered.info or not expected.nodes.equals(
-            delivered.nodes
-        ):
-            raise ValueError(f"Restored and portable {problem} inputs differ")
-        # Each side hashes its own logical arrays in little-endian float64 C order.
+        delivered = portable.view(problem)
         result[problem] = {
             "nodes": delivered.info["node_count"],
             "stations": delivered.info["station_count"],

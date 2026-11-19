@@ -32,9 +32,9 @@ python pipeline.py --work "$WORK" stage2 --city "$CITY" --split train --n 100 --
 
 ## 多台服务器
 
-可以把[服务器 agent 执行说明](docs/SERVER.zh-CN.md)随仓库地址、提交号和城市分工交给每台机器。
+首次单机验收使用 [Chicago 单例 prompt](docs/SERVER.zh-CN.md)。分布式生产时按城市或实例分片。
 
-- **不同城市。** 在每台机器先运行 `python pipeline.py --work "$WORK" sources --only live --workers 2`。同时从 AFDC、USACE 和 Census 抓取会变化的原始响应。比较各机 `public/live.lock.json` 的 SHA-256。相同后各机使用 `sources --source-lock /path/to/live.lock.json --workers 2` 下载其余公开原料，再设置各自的 `CITY` 生成。完整的 `public/sources.lock.json` 还记录按城市处理后的文件摘要；在同一批可以用这份完整锁复核。每台机器保留自己的 `raw/`。隔天新机器若收到不同的实时数据，须与其他机器另开共同采集批次，或使用本机构保存的同一批官方原始响应。
+- **不同城市。** 各机用同一份来源锁下载公开原料，再设置各自的 `CITY`。下方命令用于对齐 AFDC、USACE 和 Census 的实时响应。
 - **同城多机。** 同城机器使用相同输入锁、软件版本、CPU 架构和 BLAS。各自构建、登记后，对照 `plans/<city>.json` 的 SHA-256。相同清单按下面两条命令各执行一条。节点顺序、路网文件、随机流和计划均绑定；工作路径和本机回执时间可以不同。
 - **同机多进程。** `stage1 --city chicago dallas --workers 2` 并行组装两城。Stage 2 的 `--workers 2` 并行两个实例。根据可用内存设置进程数，每个 Stage 2 worker 持有本城路网。
 - **正式面板。** 去掉 `--split/--n/--limit` 即执行本机负责的全部槽位。11 城计划汇总后运行 `seal-plans`。收回分片后用 `audit` 检查已完成、未证、失败、遗漏和重复槽位。重跑原命令复用已校验的结果并以原 seed 重试执行异常。首发目标为 17,400 个槽位，四档 CS 预算为 10／30／40／50。[建模和配额](docs/METHOD.zh-CN.md)
@@ -79,9 +79,4 @@ python export_instance.py "$WORK/restored/chicago-instance1" --out "$WORK/parque
 
 ## 开发验证
 
-```bash
-python -m pytest -q
-EVRPTWD_TEST_CATALOG="$WORK/public/amazon" python -m pytest -q
-```
-
-第二条会额外执行需要完整 Amazon 订单库的双进程生成、恢复和重试测试。各子命令的完整参数见 `python pipeline.py <命令> --help`。
+运行 `python -m pytest -q`。本机已有完整 Amazon 订单库时，使用 `EVRPTWD_TEST_CATALOG="$WORK/public/amazon" python -m pytest -q`，同一轮会覆盖双进程生成、恢复和重试。

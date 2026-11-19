@@ -31,8 +31,12 @@ RULES = {
 
 
 def file_header(path):
-    meta = pq.read_schema(path).metadata or {}
-    if FOOTER_KEY not in meta:
+    return _header(pq.read_schema(path))
+
+
+def _header(schema):
+    meta = schema.metadata
+    if not meta or FOOTER_KEY not in meta:
         raise ValueError("Missing portable EVRPTW-D instance footer")
     obj = json.loads(meta[FOOTER_KEY])
     if obj.get("schema") != FORMAT or json_sha256(obj["payload"]) != obj.get(
@@ -50,12 +54,18 @@ def file_header(path):
 
 
 def read_instance(path, problem="evrptw"):
-    path = Path(path)
-    info = file_header(path)["payload"]["instance"]
-    if info["problem_type"] != "evrptw":
-        raise ValueError("Portable source must contain the complete EV task")
+    return read_portable(path, problem)[1]
+
+
+def read_portable(path, problem="evrptw"):
+    """Read the footer and requested solver inputs from the same open Parquet."""
     names = ["instance_id", *NODE_FIELDS["evrptw"]]
-    table = pq.ParquetFile(path).read(columns=[*names, *MATRICES[problem]])
+    with pq.ParquetFile(path) as file:
+        header = _header(file.schema_arrow)
+        info = header["payload"]["instance"]
+        if info["problem_type"] != "evrptw":
+            raise ValueError("Portable source must contain the complete EV task")
+        table = file.read(columns=[*names, *MATRICES[problem]])
     # Preserve logical order even after a physical Parquet rewrite.
     if table["node_idx"].to_pylist() != list(range(info["node_count"])):
         table = table.sort_by("node_idx")
@@ -63,7 +73,7 @@ def read_instance(path, problem="evrptw"):
     rows = table.select(["node_idx", *MATRICES[problem]]).rename_columns(
         ["from_idx", *MATRICES[problem]]
     )
-    return decode_problem(info, nodes, rows, problem)
+    return header, decode_problem(info, nodes, rows, problem)
 
 
 def write_instance(path, task, city_binding):
@@ -85,9 +95,9 @@ def write_instance(path, task, city_binding):
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def reuse():
-        if file_header(path) != header:
+        existing, _ = read_portable(path)
+        if existing != header:
             raise ValueError(f"Different instance or CLE already published at {path}")
-        read_instance(path)
 
     if path.exists():
         reuse()
@@ -113,8 +123,7 @@ def write_instance(path, task, city_binding):
 
 
 def unpack(path, out, problem):
-    source = file_header(path)
-    task = read_instance(path, problem)
+    source, task = read_portable(path, problem)
     if out.exists():
         raise FileExistsError(out)
     out.parent.mkdir(parents=True, exist_ok=True)

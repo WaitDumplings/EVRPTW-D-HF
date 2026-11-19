@@ -8,33 +8,21 @@
 set -euo pipefail
 WORK=/data/evrptwd-work
 OUTPUT=/data/evrptwd-output
-python pipeline.py --work "$WORK" sources --only live --workers 2
-sha256sum "$WORK/public/live.lock.json"
-```
-
-若多台机器将参与同批，先比对这份实时来源锁。接下来在本机运行：
-
-```bash
-python pipeline.py --work "$WORK" sources --source-lock "$WORK/public/live.lock.json" --workers 2
-python pipeline.py --work "$WORK" stage1 --phase shared
-python pipeline.py --work "$WORK" stage1 --phase cities --city chicago --workers 2
+python pipeline.py --work "$WORK" sources --workers 2
+python pipeline.py --work "$WORK" stage1 --city chicago --workers 2
 python pipeline.py --work "$WORK" prepare-city --city chicago
 python pipeline.py --work "$WORK" plan --city chicago
 python pipeline.py --work "$WORK" stage2 --city chicago --split train --n 100 --limit 1 --workers 1
-```
 
-检查台账状态为 `protocol_certified`。若失败或未获见证，保留原 seed、槽位和日志，报告原因并停止。否则恢复并发布同一个实例：
-
-```bash
 F="$WORK/instances/chicago/train/Cus100/instance0001.evrp.zip"
-test -f "$F"
 OUT=$(mktemp -d "$WORK/chicago-cus100-check.XXXXXX")
 python pipeline.py --work "$WORK" restore "$F" --out "$OUT/restored"
 python export_output.py --out "$OUTPUT" cle --work "$WORK" --city chicago
 FILE=$(python export_output.py --out "$OUTPUT" instance "$OUT/restored")
-python export_output.py --out "$OUTPUT" verify-cle --city chicago --instance "$FILE"
 python export_output.py --out "$OUTPUT" plot "$FILE" --dest "$OUT/chicago-cus100.png"
 python export_output.py verify-instance "$FILE" --restored "$OUT/restored" | tee "$OUT/solver-check.json"
 ```
 
-核对 1 个 depot、100 个客户、10 座 CS，以及 CVRP／VRPTW 的 101×101 子矩阵和 EVRPTW 的四张 111×111 有向矩阵。打开 PNG，检查全城和客户局部视图、仓库和站点标记。回复时把 PNG 作为附件发给我，同时给出提交号、CLE 路径、实例 Parquet 路径、实例 ID 和验收结果。到此停止，等待我的批量运行指令。
+首个槽位若失败或未获路线见证，从 `$WORK/ledger/chicago/train/Cus100/instance0001/result.json` 报告原因，保留原 seed。
+
+从同一个 Parquet 核对 1 个 depot、100 个客户、10 座 CS，以及 CVRP／VRPTW 的 101×101 子矩阵和 EVRPTW 的四张 111×111 有向矩阵。把 Chicago 的 PNG 作为附件发给我，同时给出提交号、CLE 路径、实例 Parquet 路径、实例 ID 和验收结果。到此停止，等待我的批量运行指令。

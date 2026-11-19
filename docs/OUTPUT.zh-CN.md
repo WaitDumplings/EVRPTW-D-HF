@@ -30,7 +30,6 @@ OUTPUT=/data/evrptwd-output
 python export_output.py --out "$OUTPUT" cle --work "$WORK" --city chicago
 F="$WORK/instances/chicago/train/Cus100/instance0001.evrp.zip"
 FILE=$(python export_output.py --out "$OUTPUT" instance "$F")
-python export_output.py --out "$OUTPUT" verify-cle --city chicago --instance "$FILE"
 python export_output.py --out "$OUTPUT" plot "$FILE" --dest chicago-cus100.png
 ```
 
@@ -52,6 +51,8 @@ Parquet 文件键值元数据 `evrptwd.instance` 是 UTF-8 JSON。`schema=evrptw
 CVRP 使用仓库和客户的距离子矩阵。VRPTW 同时使用同路径行驶时间、服务时间、硬服务开始窗和班次。EVRPTW 加入 CS，耗电量为里程 km 乘车型系数 kWh/km，车辆到达节点含回仓时满足最低 SOC。站点按有效功率 kW 线性充满，可以复访，depot 负责出发和回仓。时间以当地午夜起的秒数计，可等待。各求解器报告的总米数使用原始 float64 距离，包含各路线首尾与仓库之间的有向路段。只支持整数的求解器记录内部缩放与取整方式，最终在原始矩阵上重算总米数。
 
 ## 交给求解器
+
+将 CLE 和实例复制到另一台机器后，可在接收端运行 `python export_output.py --out "$OUTPUT" verify-cle --city chicago --instance "$FILE"`，核对城市文件的完整性和实例引用的城市版本。
 
 ```python
 from instance_file import read_instance
