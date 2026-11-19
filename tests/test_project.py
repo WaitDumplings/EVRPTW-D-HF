@@ -289,25 +289,27 @@ while len(list(dest.glob('*'))) < 2:
     marker.mkdir()
 
     def launch(command, log, env):
+        city = command[command.index("--cities") + 1]
+        root = roots / city
+        assert list(read(root / "stage1.local.json")["cities"]) == [city]
         if "finalize" in command:
             for name in (
                 "quality_thresholds.json",
                 "metric_scales.csv",
                 "calibration_predictions.parquet",
             ):
-                write(roots / "units" / name, {"fixture": name})
-            for city in CITIES:
-                for name in ("unit_reference_roster", "final_buildings"):
-                    write(
-                        roots / f"cities/{city}/customer_inputs/{name}.parquet",
-                        {"fixture": city},
-                    )
+                write(root / "units" / name, {"fixture": city})
+            for name in ("unit_reference_roster", "final_buildings"):
+                write(
+                    root / f"cities/{city}/customer_inputs/{name}.parquet",
+                    {"fixture": city},
+                )
         if "components" in command:
             city = command[command.index("--cities") + 1]
             subprocess.run([sys.executable, child, marker, city], check=True, env=env)
         if "verify" in command:
             city = command[command.index("--cities") + 1]
-            city_root = roots / "cities" / city
+            city_root = root / "cities" / city
             write(city_root / "cle_manifest.json", {"city": city, "files": {}})
             write(
                 city_root / "stage1_validation.json",
@@ -321,36 +323,38 @@ while len(list(dest.glob('*'))) < 2:
     from stage2.common import digest
 
     staged = tmp_path / "inputs"
-    for n in [*CITIES, "afdc"]:
+    cities = ["chicago", "dallas"]
+    for n in [*cities, "afdc"]:
         write(staged / n / "receipt.json", {"outputs": {}})
-    write(
-        staged / "inventory.json",
-        {
-            "schema": "evrptwd_public_stage1_v1",
-            "cities": dict.fromkeys(CITIES, {}),
-            "source_vintages": {},
-            "component_sha256": dict.fromkeys([*CITIES, "afdc"], digest({})),
-        },
-    )
-    phase = lambda name, cities: stage_one.run(
-        tmp_path / "inputs", roots, cities, name, 2
-    )
-    phase("shared", CITIES)
-    assert list(read(roots / "stage1.local.json")["cities"]) == list(CITIES)
-    phase("cities", ["chicago", "dallas"])
+
+    def inventory(root, selected, dest):
+        assert len(selected) == 1
+        write(
+            dest,
+            {
+                "schema": "evrptwd_public_stage1_v1",
+                "cities": {selected[0]: {}},
+                "source_vintages": {},
+                "component_sha256": dict.fromkeys([*selected, "afdc"], digest({})),
+            },
+        )
+
+    monkeypatch.setattr("sources.prepare.write_inventory", inventory)
+    stage_one.run(staged, roots, cities, 2)
     assert len({p.read_text() for p in marker.iterdir()}) == 2
-    for city in set(CITIES) - {"chicago", "dallas"}:
-        launch(["verify", "--cities", city], None, None)
-    phase("seal", CITIES)
-    stamp = sha(roots / "stage1_server_build_receipt.json")
-    phase("cities", ["chicago", "dallas"])
-    phase("seal", CITIES)
-    assert sha(roots / "stage1_server_build_receipt.json") == stamp
-    receipt = read(roots / "stage1_server_build_receipt.json")
-    assert (
-        set(receipt["cle_manifests"]) == set(CITIES)
-        and receipt["complete_cle_validation_passed"]
+    hashes = []
+    for city in cities:
+        base = roots / city / "cities" / city
+        receipt = read(base / "public_authority.json")
+        assert receipt["calibration_cohort"] == [city]
+        hashes.append(receipt["calibration_sha256"])
+    assert len(set(hashes)) == 2
+    monkeypatch.setattr(
+        stage_one,
+        "launch",
+        lambda *args: pytest.fail("Unexpected rebuild"),
     )
+    stage_one.run(staged, roots, cities, 2)
 
 
 def test_r1_local_access_context_with_policy(tmp_path):
@@ -400,7 +404,7 @@ def test_release_index(tmp_path):
         base = tmp_path / "shared" / city
         write(
             base / "shared.json",
-            {"city": city, "vintage": "raw-test", "calibration": "cal-test"},
+            {"city": city, "vintage": "raw-" + city, "calibration": "cal-" + city},
         )
         loc.to_parquet(base / "locations.parquet")
         save_plan(base, folder / (city + ".json"), 20261103, "2026-11-02", 28)

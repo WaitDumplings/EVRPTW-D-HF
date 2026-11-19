@@ -97,3 +97,16 @@ def test_stage1_cli_returns_failure_when_saved_cle_validation_fails(tmp_path, mo
     with pytest.raises(SystemExit) as result:
         stage1.main(['verify', str(tmp_path / 'stage1.json')])
     assert result.value.code == 1
+
+
+@pytest.mark.parametrize("calibration_costs", [[], [float("nan")]])
+def test_city_without_supported_reference_cannot_admit_neighbor(calibration_costs):
+    from evrptw_cle.unit_quality import apply_quality, fit_quality_thresholds
+
+    calibration = pd.DataFrame({"neighbor_cost": calibration_costs,
+                                "neighbor_log_spread_90": [0.] * len(calibration_costs)})
+    thresholds = fit_quality_thresholds(calibration, allow_empty=True)
+    target = pd.DataFrame({"neighbor_cost": [0.], "neighbor_log_spread_90": [0.], "neighbor_count": [8]})
+    assert thresholds["fit_status"] == "no_supported_calibration_observations"
+    assert thresholds["strata"] == []
+    assert not apply_quality(target, thresholds).quality_pass.any()

@@ -95,7 +95,9 @@ def verify_city(base, city, expected=None, full=True):
 
 
 def publish_city(work, output, city):
-    base, shared = work / "stage1/cities" / city, work / "shared" / city
+    from stage2.stage_one import city_root
+
+    base, shared = city_root(work, city) / "cities" / city, work / "shared" / city
     binding, files = city_inventory(base, shared, city)
     dest = output / "CLE" / city
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -113,6 +115,24 @@ def publish_city(work, output, city):
                     shutil.copyfile(source, target)
                 verify_city(stage, city, expected=binding)
                 stage.rename(dest)
+        if read(base / "public_authority.json")["schema"] == "evrptwd_local_city_v1":
+            local = city_root(work, city)
+            evidence = output / "reports" / city / "provenance"
+            evidence.mkdir(parents=True, exist_ok=True)
+            for filename in (
+                "inventory.json",
+                "calibration-ready.json",
+                "units/calibration.json",
+                "units/metric_scales.csv",
+                "units/quality_thresholds.json",
+            ):
+                shutil.copyfile(local / filename, evidence / Path(filename).name)
+            records = {}
+            for component in (city, "afdc", "amazon"):
+                receipt = work / "public" / component / "receipt.json"
+                if receipt.exists():
+                    records[component] = read(receipt)["sources"]
+            write(evidence / "public_sources.json", records)
     return dest
 
 
@@ -160,19 +180,23 @@ def verify_published_archive(source, target, binding):
 
 def publish_city_instances(work, output, city):
     """Publish certified slots from the sealed plan, including previously delivered files."""
-    from stage2.plan import instance_namespace
+    from stage2.plan import city_contract, instance_namespace
 
     plan_file = work / "plans" / (city + ".json")
     plan_id = sha(plan_file)
-    release = read(plan_file.parent / "release.json")
-    if release["plans_sha256"][city] != plan_id:
-        raise ValueError(f"City plan disagrees with the release index: {city}")
+    index = plan_file.parent / "release.json"
     plan = read(plan_file)
+    if index.exists():
+        if read(index)["plans_sha256"][city] != plan_id:
+            raise ValueError(f"City plan disagrees with the release index: {city}")
+    else:
+        city_contract(city, plan)
     namespace = instance_namespace(plan, plan_id)
     binding = verify_city(output / "CLE" / city, city, full=False)
     if binding["shared_sha256"] != plan["shared_sha256"]:
         raise ValueError(f"City plan and published CLE disagree: {city}")
     counts = {}
+    slots = []
     for task in plan["tasks"]:
         split, n = public_split(city, task["split"]), task["n"]
         cell = counts.setdefault((split, n), Counter())
@@ -180,11 +204,26 @@ def publish_city_instances(work, output, city):
         part = Path(city) / task["split"] / f"Cus{n}"
         slot = f"instance{task['slot']:04d}"
         receipt = work / "ledger" / part / slot / "result.json"
+        row = dict(
+            city=city,
+            split=split,
+            n=n,
+            slot=task["slot"],
+            seed=task["seed"],
+            cs_budget=task["cs_budget"],
+            status="pending",
+            reason=None,
+            instance_id=None,
+            path=None,
+            sha256=None,
+        )
+        slots.append(row)
         if not receipt.is_file():
             continue
         result = read(receipt)
         if result["signature"] != digest([plan_id, task]) or result["task"] != task:
             raise ValueError(f"Slot belongs to a different plan: {receipt}")
+        row.update(status=result["status"], reason=result.get("reason"))
         if result["status"] != "protocol_certified":
             continue
         archive = Path("instances") / part / (slot + ".evrp.zip")
@@ -211,6 +250,22 @@ def publish_city_instances(work, output, city):
                 source = previous
             publish_instance(source, output)
             cell["published"] += 1
+        row.update(
+            instance_id=name,
+            path=target.relative_to(output).as_posix(),
+            sha256=sha(target),
+        )
+    report = output / "reports" / city
+    report.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=report) as tmp:
+        import pandas as pd
+
+        table = Path(tmp) / "slots.parquet"
+        pd.DataFrame(slots).to_parquet(table, index=False)
+        table.replace(report / "slots.parquet")
+        copy = Path(tmp) / "plan.json"
+        shutil.copyfile(plan_file, copy)
+        copy.replace(report / "plan.json")
     return [
         {
             "city": city,
@@ -302,7 +357,7 @@ def main():
     )
     inst.add_argument("source", type=Path)
     batch = subs.add_parser(
-        "city-instances", help="Publish certified slots from a sealed city plan"
+        "city-instances", help="Publish certified slots from a registered city plan"
     )
     batch.add_argument("--work", type=Path, required=True)
     batch.add_argument("--city", choices=CITIES, required=True)

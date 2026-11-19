@@ -41,7 +41,7 @@ def _positive(value):
         return np.nan
 
 
-def select_reference_configurations(locations, members, units, medians, *, facility_categories=True):
+def select_reference_configurations(locations, members, units, medians, *, facility_categories=True, median_scope="national"):
     """Choose one eligible member/connector; never combine power or port counts.
 
     The location pool is preserved. Vehicle eligibility is a separate flag.
@@ -124,9 +124,9 @@ def select_reference_configurations(locations, members, units, medians, *, facil
                 raw = _positive(unit[power_col]) if unit is not None else np.nan
                 qa = mode == "ac_level2" and pd.notna(raw) and raw > 19.2
                 reported = pd.notna(raw) and not qa
-                assigned = float(raw) if reported else float(medians[mode])
+                assigned = float(raw) if reported else float(medians.get(mode, np.nan))
                 if not np.isfinite(assigned) or assigned <= 0:
-                    raise ValueError("No positive national compatible-mode power median")
+                    continue  # No measured donor for this connector mode in the selected scope.
                 compatible.append(
                     {
                         "charging_location_id": member.charging_location_id,
@@ -140,9 +140,9 @@ def select_reference_configurations(locations, members, units, medians, *, facil
                         "power_is_reported": bool(reported),
                         "power_source": "reported_compatible_connector"
                         if reported
-                        else "national_mode_median_after_qa"
+                        else f"{median_scope}_mode_median_after_qa"
                         if qa
-                        else "national_mode_median_missing_power",
+                        else f"{median_scope}_mode_median_missing_power",
                         "assigned_power_kw": assigned,
                         "vehicle_cap_kw": cap,
                         "capped_pre_derating_kw": min(assigned, cap),
@@ -269,8 +269,8 @@ def select_reference_configurations(locations, members, units, medians, *, facil
     return result, members, configurations, summary
 
 
-def national_port_weighted_power_medians(units):
-    """Current source-qualified national medians, before any city/road filter."""
+def port_weighted_power_medians(units):
+    """Measured compatible power, weighted by port counts within the given rows."""
     selected = units.copy()
     for field, value in {"Country": "US", "Fuel Type Code": "ELEC",
                          "Access Code": "public", "Status Code": "E"}.items():
@@ -288,7 +288,8 @@ def national_port_weighted_power_medians(units):
         order = np.argsort(values[good].to_numpy(), kind="stable")
         v, w = values[good].to_numpy()[order], weights[good].to_numpy()[order]
         if not len(v):
-            raise ValueError("No national source-qualified reported power for " + mode)
+            counts[mode] = dict(source_rows=0, ports=0)
+            continue
         cumulative = np.cumsum(w)
         # Count-weighted median without expanding one row per port.
         lower = np.searchsorted(cumulative, cumulative[-1] / 2, side="left")

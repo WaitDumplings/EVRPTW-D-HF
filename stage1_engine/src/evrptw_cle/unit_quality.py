@@ -144,7 +144,7 @@ def _error_diagnostics(frame, accepted):
     return diagnostics
 
 
-def fit_quality_thresholds(calibration_df: pd.DataFrame, cfg=None):
+def fit_quality_thresholds(calibration_df: pd.DataFrame, cfg=None, *, allow_empty=False):
     """Fit data-based rectangles using calibration predictions only.
 
     Required metrics: neighbor_cost and the configured log-unit dispersion.
@@ -163,14 +163,14 @@ def fit_quality_thresholds(calibration_df: pd.DataFrame, cfg=None):
     actual_dispersion = config["quality_dispersion_column"]
     cost, spread, count, weights, valid = _metric_inputs(calibration_df, config, include_weights=True)
     data = calibration_df.loc[valid].copy().reset_index(drop=True)
-    if data.empty:
+    if data.empty and not allow_empty:
         raise ValueError("No finite positive-weight held-out reference predictions to calibrate")
     data["_cost"] = cost[valid]
     data["_spread"] = spread[valid]
     data["_weight"] = weights[valid]
     normalized = _labels(data, ["city", "use_type", "neighbor_branch"])
     rows = []
-    for columns in HIERARCHIES:
+    for columns in (HIERARCHIES if len(data) else []):
         if columns:
             keys = normalized[columns]
             groups = keys.groupby(columns, dropna=False, sort=True).groups.items()
@@ -197,6 +197,7 @@ def fit_quality_thresholds(calibration_df: pd.DataFrame, cfg=None):
             "dispersion_column": actual_dispersion,
             "calibration_rows_total": len(calibration_df), "calibration_rows_valid": len(data),
             "calibration_rows_invalid": int((~valid).sum()),
+            "fit_status": "fitted" if len(data) else "no_supported_calibration_observations",
             "hierarchies": HIERARCHIES, "strata": rows,
             "method": f"Smallest common-marginal-quantile cost/{actual_dispersion} rectangle reaching weighted joint calibration retention",
             "interpretation": "Reference-support retention, not an accuracy guarantee; test labels were not read",

@@ -1,6 +1,5 @@
 """Pre-register the city slice of the 17,400-slot panel independently of execution order."""
 
-from collections import Counter
 from datetime import date, timedelta
 import hashlib
 import json
@@ -165,57 +164,62 @@ def save_plan(shared, path, seed, start, days, custom=None):
     return len(plan["tasks"])
 
 
-def seal_plans(folder):
-    """Bind the official eleven-city targets. Custom research panels are separate."""
+def city_contract(city, panel):
+    """Validate one release slice using only the panel and the published design."""
     registered = read(PROJECT / "config/release_panel.json")
+    if panel["city"] != city or panel["tasks_sha256"] != digest(panel["tasks"]):
+        raise ValueError("Wrong city or changed task list: " + city)
+    if any(panel[k] != value for k, value in registered.items()) or not all(
+        panel[k] for k in ("input_vintage", "calibration_sha256")
+    ):
+        raise ValueError(
+            "Incompatible release plan or missing city calibration: " + city
+        )
+    quotas = {
+        (s, n): count
+        for s, sizes in QUOTA.items()
+        if (city == "jacksonville") == (s == "test2")
+        for n, count in sizes.items()
+    }
+    slots = set()
+    for t in panel["tasks"]:
+        split, n = public_split(city, t["split"]), t["n"]
+        key = (split, n, t["slot"])
+        if (
+            t["city"] != city
+            or key in slots
+            or not 1 <= t["slot"] <= quotas.get((split, n), 0)
+            or t["cs_budget"] != BUDGET[n]
+        ):
+            raise ValueError("Invalid release slot: " + city)
+        slots.add(key)
+    if len(slots) != sum(quotas.values()):
+        raise ValueError("Release quotas differ: " + city)
+    return {k: panel[k] for k in (*registered, "code_sha256", "resource_sha256")}
+
+
+def seal_plans(folder):
+    """Collect independent city plans after production."""
     common = None
-    hashes = {}
+    hashes, city_inputs = {}, {}
     total = 0
     for city in CITIES:
         path = folder / (city + ".json")
         panel = read(path)
-        if panel["city"] != city or panel["tasks_sha256"] != digest(panel["tasks"]):
-            raise ValueError("Wrong city or changed task list: " + city)
-        fields = {
-            key: panel[key]
-            for key in (
-                "version",
-                "root_seed",
-                "calendar_start",
-                "calendar_days",
-                "runtime",
-                "code_sha256",
-                "resource_sha256",
-                "input_vintage",
-                "calibration_sha256",
-            )
-        }
-        if any(fields[k] != value for k, value in registered.items()) or not all(
-            fields[k] for k in ("input_vintage", "calibration_sha256")
-        ):
-            raise ValueError(
-                "Incompatible release plan or missing public calibration: " + city
-            )
+        fields = city_contract(city, panel)
         if common is not None and common != fields:
             raise ValueError("Incompatible release plan: " + city)
         common = fields
-        quotas = {
-            (s, n): count
-            for s, dd in QUOTA.items()
-            if (city == "jacksonville") == (s == "test2")
-            for n, count in dd.items()
+        city_inputs[city] = {
+            k: panel[k]
+            for k in ("runtime", "input_vintage", "calibration_sha256", "shared_sha256")
         }
-
-        if (
-            Counter((public_split(city, t["split"]), t["n"]) for t in panel["tasks"])
-            != quotas
-        ):
-            raise ValueError("Release quotas differ: " + city)
         hashes[city] = sha(path)
         total += len(panel["tasks"])
     result = dict(
-        schema="evrptwd_panel_v1",
+        schema="evrptwd_city_panel_v2",
         contract=common,
+        city_inputs=city_inputs,
         plans_sha256=hashes,
         task_count=total,
     )

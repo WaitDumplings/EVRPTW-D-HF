@@ -1,6 +1,6 @@
 # EVRPTW-D
 
-从公开原始数据构造美国 11 城的电动货车配送实例。仓库提供 Python 代码、拟合后的模型参数、来源清单和测试。服务器从数据发布机构直接下载原料，在工作目录完成裁剪和建模。Stage 1 沿用建筑、路网和设施规则，本次城市环境使用标识 `stage1-public-v1`。Stage 2 使用 `2026-11-18-r3`。
+从公开原始数据构造美国 11 城的电动货车配送实例。仓库提供 Python 代码、拟合后的模型参数、来源清单和测试。服务器从数据发布机构直接下载原料，在工作目录完成裁剪和建模。Stage 1 对每座城市独立拟合住宅户数，并在本城内补全缺失的兼容充电功率。城市回执标识为 `evrptwd_local_city_v1`。Stage 2 使用 `2026-11-18-r3`。
 
 ## 安装
 
@@ -19,39 +19,20 @@ python pipeline.py --help
 ```bash
 WORK=/data/evrptwd
 CITY=chicago
-python pipeline.py --work "$WORK" sources --workers 2
+python pipeline.py --work "$WORK" sources --city "$CITY" --workers 2
 python pipeline.py --work "$WORK" stage1 --city "$CITY" --workers 2
 python pipeline.py --work "$WORK" prepare-city --city "$CITY"
 python pipeline.py --work "$WORK" plan --city "$CITY"
 python pipeline.py --work "$WORK" stage2 --city "$CITY" --split train --n 100 --limit 1
 ```
 
-第一条 `sources` 默认下载和处理全部 11 城的 Stage 1 来源及公共 Amazon 订单库。多个城市用子进程并行。住宅户数的邻居估计在 11 城共同校准，所以即使本机仅负责 Chicago，也要先准备联合校准输入。第二条命令完成联合校准，再只为 Chicago 构建 CLE、核对产物并签发城市回执。已有该工作目录时直接重跑相同命令。网络中断后保留已完成的下载与城市组件。
+以上命令只准备 Chicago 的地理原料和公共订单库。Stage 1 的近邻、质量阈值和同类端口功率均从该城计算。已有同版工作目录时，重跑原命令即可续跑。
 
 默认采用 Geofabrik 的 2026-11-01 有日期的 PBF。需要指定发布日时，把 `--osm-date YYYY-MM-DD` 加到 `sources`。来源锁会记录该选项，其他机器传入锁后自动沿用。公共 AFDC API 默认使用 DEMO_KEY，生产机器可设置环境变量 `AFDC_API_KEY` 使用自己的免费密钥。来源、获取内容和数据条款见[数据说明](docs/SOURCES.zh-CN.md)。
 
 ## 多台服务器
 
-本次 17,400 个槽位从已验收的 Chicago 工作目录续跑。A 复用 11 城联合校准，准备其余十城 CLE；B、C 接收各自负责城市的资产。逐机命令、首例复用和交付清单见[正式批量生产交接](docs/BATCH.zh-CN.md)。独立从零复现时可以使用 [Chicago 单例 prompt](docs/SERVER.zh-CN.md) 和下列分片方式。
-
-- **不同城市。** 各机用同一份来源锁下载公开原料，再设置各自的 `CITY`。下方命令用于对齐 AFDC、USACE 和 Census 的实时响应。
-- **同城多机。** 同城机器使用相同输入锁、软件版本、CPU 架构和 BLAS。各自构建、登记后，对照 `plans/<city>.json` 的 SHA-256。相同清单按下面两条命令各执行一条。节点顺序、路网文件、随机流和计划均绑定；工作路径和本机回执时间可以不同。
-- **同机多进程。** `stage1 --city chicago dallas --workers 2` 并行组装两城。Stage 2 的 `--workers 2` 并行两个实例。根据可用内存设置进程数，每个 Stage 2 worker 持有本城路网。
-- **正式面板。** 去掉 `--split/--n/--limit` 即执行本机负责的全部槽位。11 城计划汇总后运行 `seal-plans`。收回分片后用 `audit` 检查已完成、未证、失败、遗漏和重复槽位。重跑原命令复用已校验的结果并以原 seed 重试执行异常。首发目标为 17,400 个槽位，四档 CS 预算为 10／30／40／50。[建模和配额](docs/METHOD.zh-CN.md)
-
-```bash
-python pipeline.py --work "$WORK" stage2 --city "$CITY" --workers 2 --shard 0/2
-python pipeline.py --work "$WORK" stage2 --city "$CITY" --workers 2 --shard 1/2
-python pipeline.py --work "$WORK" audit --city "$CITY" --outputs /data/shard0 /data/shard1
-```
-
-需要在各机从公开源独立重建时，先在各机执行下面两行。确认各机打印的哈希相同后，将第一台机器的 `live.lock.json` 存作 `REF`，再执行第三行。完整 `sources.lock.json` 的摘要用于核对原料和空间处理结果。封板时另核对 11 城共用的住宅校准文件摘要。
-
-```bash
-python pipeline.py --work "$WORK" sources --only live --workers 2
-sha256sum "$WORK/public/live.lock.json"
-python pipeline.py --work "$WORK" sources --source-lock "$REF" --workers 2
-```
+四台机器各自按城市从公开源构造 CLE 和实例，共 17,400 个预登记槽位。每台执行 `bash scripts/generate_cities.sh A`（最后一个参数为本机字母）。完成后用 `merge_dataset.py` 合并，生成可按城市、split 和规模检索的 Parquet 索引。[分工、批量命令和交付目录](docs/BATCH.zh-CN.md)
 
 ## 绘图和恢复
 

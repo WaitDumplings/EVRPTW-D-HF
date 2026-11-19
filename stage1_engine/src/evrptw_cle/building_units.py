@@ -127,13 +127,11 @@ def calibrate_units(project, cities):
         write_reference_roster(input_dir(project, city), ref, split)
         fitted = model(cfg).fit(ref.loc[split.eq('train')])
         cal = ref.loc[split.eq('calibration')]
-        if cal.empty:
-            continue
         sample = cal.sample(min(cfg['calibration_per_city'], len(cal)), random_state=cfg['seed'])
         pred = fitted.predict(sample)
         pred['city'], pred['use_type'] = city, sample.use_type
         pred['entity_id'] = sample.entity_id
-        pred['sampling_weight'] = len(cal) / len(sample)
+        pred['sampling_weight'] = len(cal) / len(sample) if len(sample) else 0.
         predictions.append(pred)
         scale = fitted.scales_table()
         scale['city'] = city
@@ -142,9 +140,9 @@ def calibrate_units(project, cities):
         del f, ref, fitted, sample, cal
         gc.collect()
     if not predictions:
-        raise ValueError('No held-out calibration references; include a supported city or use a saved calibrated model')
+        raise ValueError('Select a city to fit residential units')
     calibration = pd.concat(predictions, ignore_index=True)
-    thresholds = fit_quality_thresholds(calibration, cfg)
+    thresholds = fit_quality_thresholds(calibration, cfg, allow_empty=len(cities) == 1)
     write_json(dest / 'quality_thresholds.json', thresholds)
     calibration.to_parquet(dest / 'calibration_predictions.parquet', index=False)
     pd.concat(scales, ignore_index=True).to_csv(dest / 'metric_scales.csv', index=False)

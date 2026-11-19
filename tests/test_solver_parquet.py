@@ -104,6 +104,7 @@ def test_city_publication_reuses_checked_parquet_without_restoring(
         "split": slot_split,
         "n": 2,
         "slot": 1,
+        "cs_budget": 1,
         "task_key": [1],
         "seed": 1,
     }
@@ -195,6 +196,25 @@ def test_city_publication_reuses_checked_parquet_without_restoring(
     )
     [second] = export_output.publish_city_instances(work, out, city)
     assert (second["published"], second["reused"]) == (0, 1)
+
+    if slot_split == public_name:
+        import pandas as pd
+        from merge_dataset import collect_slots
+
+        table_file = out / "reports" / city / "slots.parquet"
+        slots = pd.read_parquet(table_file)
+        assert slots.status.tolist() == [
+            "protocol_certified",
+            "generation_failed",
+            "pending",
+        ]
+        with pytest.raises(ValueError, match="Unfinished"):
+            collect_slots(out, city, tmp_path / "incomplete", panel, binding)
+        slots.loc[slots.status.eq("pending"), "status"] = "protocol_uncertified"
+        slots.to_parquet(table_file, index=False)
+        collected = collect_slots(out, city, tmp_path / "dataset", panel, binding)
+        assert collected.instance_id.dropna().tolist() == [name]
+        assert sha(tmp_path / "dataset" / collected.iloc[0].path) == sha(published)
 
     # A valid portable file for the same ID can still contain a different vehicle.
     vehicle = read(fixture / "vehicle.json")

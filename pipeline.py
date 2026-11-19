@@ -55,10 +55,8 @@ def cli(argv=None):
         help="Verify raw responses against another host's small sources.lock.json",
     )
     s = subs.add_parser(
-        "stage1", help="Build a public-source CLE with shared 11-city unit calibration"
-    )
-    s.add_argument(
-        "--phase", choices=("shared", "cities", "seal", "all"), default="all"
+        "stage1",
+        help="Build a CLE with housing estimates fitted independently within each city",
     )
     s.add_argument("--city", nargs="+", choices=CITIES, default=list(CITIES))
     s.add_argument("--workers", type=positive, default=1)
@@ -169,14 +167,17 @@ def cli(argv=None):
             args.inputs or w / "public",
             w / "stage1",
             args.city,
-            args.phase,
             args.workers,
         )
     elif args.cmd == "prepare-city":
         from stage2.city import prepare
+        from stage2.stage_one import city_root
 
         prepare(
-            args.cle_root or w / "stage1", args.city, shared, w / "public" / args.city
+            args.cle_root or city_root(w, args.city),
+            args.city,
+            shared,
+            w / "public" / args.city,
         )
         print(shared)
     elif args.cmd == "plan":

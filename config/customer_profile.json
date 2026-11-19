@@ -1,6 +1,6 @@
 {
   "method_version": "2026-11-18-r3",
-  "stage1": "stage1-public-v1",
+  "stage1": "evrptwd_local_city_v1",
   "nomination": "boundary_parent",
   "archive_time_limit_s": 4566.3,
   "one_way_budget_kwh": 90.0,

@@ -121,9 +121,17 @@ def build_charging_layers(
     locations, members = collapse_charging_locations(points)
     members["source_location_eligible"] = members.charger_candidate_eligible
     locations["potential_location_eligible"] = locations.charger_candidate_eligible
+    median_scope = "city" if medians is None else "national"
+    if median_scope == "city":
+        from .charging_parameters import port_weighted_power_medians
+        city_ids = members.loc[members.source_location_eligible, "ID"]
+        medians, counts = port_weighted_power_medians(units.loc[units.ID.isin(city_ids)])
     locations, members, configurations, parameters = select_reference_configurations(
-        locations, members, units, medians, facility_categories=facility_categories
+        locations, members, units, medians, facility_categories=facility_categories, median_scope=median_scope
     )
+    if median_scope == "city":
+        parameters["city_power_medians_kw"] = medians
+        parameters["city_power_median_source_counts"] = counts
     locations["reference_vehicle_compatible"] = locations.reference_vehicle_eligible
     if len(locations):
         locations["latent_service_location_id"] = locations.charging_location_id
@@ -265,9 +273,14 @@ def build_charging_component(
     footprints = gpd.read_parquet(footprints_path) if footprints_path is not None else None
     medians = contract["new_national_medians_kw"]
     national_median_counts = None
-    if not getattr(context, "facility_masks", True):
-        from .charging_parameters import national_port_weighted_power_medians
-        medians, national_median_counts = national_port_weighted_power_medians(units)
+    from .public_binding import inventory
+    declared = inventory()
+    city_only = declared is not None and set(declared["cities"]) == {city_slug}
+    if city_only:
+        medians = None  # Compute only after geographic and public-access filtering.
+    elif not getattr(context, "facility_masks", True):
+        from .charging_parameters import port_weighted_power_medians
+        medians, national_median_counts = port_weighted_power_medians(units)
     locations, members, configurations, audit, access = build_charging_layers(
         stations,
         units,
@@ -315,8 +328,10 @@ def build_charging_component(
             "status": "current_common_graph_component_not_whole_CLE_release",
             "inputs": inputs,
             "source_provenance": sources,
-            "national_power_medians_kw": medians,
-            "national_power_median_source_counts": national_median_counts,
+            **({"city_power_medians_kw": audit["parameters"]["city_power_medians_kw"],
+                "city_power_median_source_counts": audit["parameters"]["city_power_median_source_counts"]}
+               if city_only else {"national_power_medians_kw": medians,
+                                  "national_power_median_source_counts": national_median_counts}),
             "road_source": road_manifest["source"],
             "road_context_outputs": road_manifest["outputs"],
             "generation_dependencies": _dependencies(),

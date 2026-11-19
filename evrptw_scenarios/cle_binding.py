@@ -26,9 +26,11 @@ def cle_authority(city_dir, manifest):
         validation = root / "stage1_validation.json"
         receipt = json.loads(authority.read_text())
         if (
-            receipt.get("schema") != "evrptwd_public_city_v1"
+            receipt.get("schema")
+            not in {"evrptwd_public_city_v1", "evrptwd_local_city_v1"}
             or receipt.get("city") != city
-            or set(receipt.get("calibration_cohort", [])) != set(CITIES)
+            or set(receipt.get("calibration_cohort", []))
+            != ({city} if receipt["schema"] == "evrptwd_local_city_v1" else set(CITIES))
             or receipt.get("inputs_sha256")
             != manifest.get("sources", {}).get("inventory", {}).get("sha256")
             or receipt.get("validation_sha256") != sha256_file(validation)

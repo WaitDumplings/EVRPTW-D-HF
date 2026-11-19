@@ -109,7 +109,11 @@ def part(work, name, osm_date, expected):
 
 
 def make_inventory(work):
-    root = work / "public"
+    return write_inventory(work / "public", CITIES, work / "public/inventory.json")
+
+
+def write_inventory(root, selected, target):
+    """Fingerprint exactly the public inputs used by these cities."""
     cities, files, roads = {}, {}, {}
     spec = read(SPEC)["cities"]
 
@@ -121,8 +125,8 @@ def make_inventory(work):
         }
         return key
 
-    receipts = {n: read(root / n / "receipt.json") for n in [*CITIES, "afdc"]}
-    for city in CITIES:
+    receipts = {n: read(root / n / "receipt.json") for n in [*selected, "afdc"]}
+    for city in selected:
         road = receipts[city]["road"]
         roads[city] = road
         cities[city] = dict(
@@ -161,11 +165,13 @@ def make_inventory(work):
         },
         component_sha256={c: digest(v["outputs"]) for c, v in receipts.items()},
     )
-    write(root / "inventory.json", inventory)
+    if target.exists() and len(selected) == 1 and read(target) != inventory:
+        raise ValueError(f"City inventory changed in an existing build: {selected[0]}")
+    write(target, inventory)
     return inventory
 
 
-def capture_live(work, expected, workers, osm_date):
+def capture_live(work, expected, workers, osm_date, cities):
     """Capture the changing publisher responses on each host before costly GIS work."""
     from concurrent.futures import ThreadPoolExecutor
     from .geography import nsi_file, place_counties
@@ -173,8 +179,9 @@ def capture_live(work, expected, workers, osm_date):
     root = work / "public"
     keys = Store(work, expected)
     counties = set()
-    for spec in read(SPEC)["cities"].values():
-        _, members = place_counties(keys, spec)
+    specs = read(SPEC)["cities"]
+    for city in cities:
+        _, members = place_counties(keys, specs[city])
         counties.update(members)
 
     def capture_county(county):
@@ -213,7 +220,7 @@ def prepare(work, only, cities, workers, osm_date, lockfile):
     if reference_date and osm_date != reference_date:
         raise ValueError("Requested OSM date conflicts with the supplied source lock")
     if only == "live":
-        return capture_live(work, expected, workers, osm_date)
+        return capture_live(work, expected, workers, osm_date, cities or CITIES)
     names = list(cities) if only in ("all", "stage1", "cities") else []
     if only in ("stage1", "all", "afdc"):
         names.append("afdc")
@@ -230,7 +237,8 @@ def prepare(work, only, cities, workers, osm_date, lockfile):
         records = {}
         components = {}
         city_dates = set()
-        for n in [*CITIES, "afdc", "amazon"]:
+        selected = cities or CITIES
+        for n in [*selected, "afdc", "amazon"]:
             if (root / n / "receipt.json").exists():
                 receipt = read(root / n / "receipt.json")
                 policy = receipt["policy"]
@@ -268,7 +276,9 @@ def prepare(work, only, cities, workers, osm_date, lockfile):
                         )
         if len(city_dates) > 1:
             raise ValueError("Prepared cities use different OSM dates")
-        if all((root / n / "receipt.json").is_file() for n in [*CITIES, "afdc"]):
+        if set(selected) == set(CITIES) and all(
+            (root / n / "receipt.json").is_file() for n in [*CITIES, "afdc"]
+        ):
             make_inventory(work)
         lock_target = root / "sources.lock.json"
         # A host may put its reference lock at the normal output path and fetch
@@ -289,8 +299,8 @@ def prepare(work, only, cities, workers, osm_date, lockfile):
     print("Source lock:", root / "sources.lock.json")
 
 
-def verify_inputs(root, cities):
-    inv = read(root / "inventory.json")
+def verify_inputs(root, cities, inventory_path=None):
+    inv = read(inventory_path or root / "inventory.json")
     for n in [*cities, "afdc"]:
         rec = read(root / n / "receipt.json")
         if digest(rec["outputs"]) != inv["component_sha256"][n] or any(

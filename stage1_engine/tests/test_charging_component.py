@@ -278,3 +278,19 @@ def test_component_rejects_wrong_road_snapshot(tmp_path, monkeypatch):
     path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="common road snapshot"):
         build_charging_component(**options)
+
+def test_missing_city_power_cannot_use_outside_ports(tmp_path):
+    context, _ = _road(tmp_path)
+    inside = _station()
+    outside = _station(50000, 50000).assign(ID=2)
+    stations = pd.concat([inside, outside], ignore_index=True)
+    units = _units(stations)
+    units.loc[units.ID.eq(1), ["EV J1772 Power Output (kW)", "EV CCS Power Output (kW)"]] = np.nan
+    boundary = gpd.GeoDataFrame(geometry=[box(-5000, -5000, 5000, 5000)], crs=3857)
+    locations, _, configurations, audit, _ = build_charging_layers(
+        stations, units, context, masks=gpd.GeoDataFrame(geometry=[], crs=3857),
+        boundary=boundary, city_slug="synthetic", medians=None,
+    )
+    assert audit["parameters"]["city_power_medians_kw"] == {}
+    assert len(locations) == 1 and configurations.empty
+    assert not locations.iloc[0].charging_parameter_eligible
