@@ -102,7 +102,6 @@ def extract_region(pbf, boundary_path, dest, city, region, url, digest, timestam
                 if not inside:
                     values["outside_envelope_access_nodes"] += 1
     for city, values in cities.items():
-        dest = dest
         dest.mkdir(parents=True, exist_ok=True)
         ways = gpd.GeoDataFrame(values["rows"], geometry="geometry", crs=4326)
         ways.to_parquet(dest / "osm_ways.parquet", index=False)

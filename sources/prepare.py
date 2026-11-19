@@ -165,13 +165,29 @@ def prepare(work, only, cities, workers, osm_date, lockfile):
         records = {}
         for n in [*CITIES, "afdc", "amazon"]:
             if (root / n / "receipt.json").exists():
-                sources = read(root / n / "receipt.json")["sources"]
+                receipt = read(root / n / "receipt.json")
+                policy = receipt["policy"]
+                if policy["source_code"] != source_code_hash() or policy["spec"] != sha(
+                    SPEC
+                ):
+                    raise ValueError(
+                        f"Prepared component uses a different processing version: {n}"
+                    )
+                if (
+                    n in CITIES
+                    and only in ("all", "stage1", "cities")
+                    and policy["osm_date"] != osm_date
+                ):
+                    raise ValueError(f"Prepared city uses a different OSM date: {n}")
+                sources = receipt["sources"]
                 if any(k in records and records[k] != v for k, v in sources.items()):
                     raise ValueError("Conflicting source digests between components")
                 if expected is not None and any(
                     expected["files"].get(k) != v for k, v in sources.items()
                 ):
-                    raise ValueError(f"Prepared component conflicts with source lock: {n}")
+                    raise ValueError(
+                        f"Prepared component conflicts with source lock: {n}"
+                    )
                 records.update(sources)
         if all((root / n / "receipt.json").is_file() for n in [*CITIES, "afdc"]):
             make_inventory(work)

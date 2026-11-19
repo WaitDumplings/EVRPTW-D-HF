@@ -9,6 +9,7 @@ import gc
 import json
 from pathlib import Path
 import shutil
+import tempfile
 
 import geopandas as gpd
 import pandas as pd
@@ -372,12 +373,32 @@ def build_component(*, project, city, component):
     if component == "assemble":
         return assemble_building_city(project=project, city=city, inventory=inventory,
             source_root=Path(config["source_root"]), road_source_dir=road_source_dir, base=base)
+    # The city dispatcher holds the city lock. Preserve any interrupted output
+    # before retrying a writer that requires a fresh component directory.
+    pending = base / (".building-" + component)
+    if pending.exists():
+        interrupted = Path(project["output"]) / "interrupted" / city
+        interrupted.mkdir(parents=True, exist_ok=True)
+        archive = Path(tempfile.mkdtemp(prefix=component + "-", dir=interrupted))
+        names = [component]
+        if component == "roads":
+            names.append("_physical_seed_current")
+        if component in {"depots", "charging"}:
+            names.append("customer_inputs/component_obstacles.parquet")
+        for name in names:
+            item = base / name
+            if item.exists():
+                item.rename(archive / item.name)
     reused = _reuse_component(project, city, component, inventory, base, road_source_dir)
     if reused is not None:
         return reused
+    base.mkdir(parents=True, exist_ok=True)
+    pending.touch()
     footprints = None if component in {"roads", "speeds"} else _component_footprints(project, city, base)
-    return build_stage1_noncustomer_component(component, city_slug=city, inventory=inventory,
+    result = build_stage1_noncustomer_component(component, city_slug=city, inventory=inventory,
         source_root=Path(config["source_root"]), road_source_dir=road_source_dir, city_dir=base,
         footprints_path=footprints,
         road_options=project.get("construction", {}).get("roads"),
         native_access_masks=config.get("native_access_masks", {}).get(city))
+    pending.unlink()
+    return result

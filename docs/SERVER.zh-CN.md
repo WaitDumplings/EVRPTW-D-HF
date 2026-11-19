@@ -1,3 +1,18 @@
-# 给 server agent 的执行说明
+# 给服务器 agent 的任务
 
-从指定 GitHub 仓库克隆指定提交，按 README 安装 Python 3.11 和 osmium-tool，检查工作盘空间。仅从仓库登记的公共数据发布方获取原始数据。若有本批来源锁，在 sources 命令中传入 --source-lock；按分工设置城市、OSM 发布日和进程数。逐步执行 sources、stage1、prepare-city、plan 和 stage2。先用 --split train --n 100 --limit 1 生成一个样例，恢复矩阵并绘图，确认后按分片生成正式任务。Jacksonville 的样例使用 --split test3。记录当前 Git 提交、public/sources.lock.json、城市计划哈希、stage1 日志和各任务台账。多机结果按原槽位 audit。有来源哈希变化时报告具体来源和版本；沿用原 seed 续跑。
+使用下列交接信息。仓库和提交号由发起人填写，每台机器分别指定城市、工作目录和分片。
+
+| 交接项 | 示例 |
+|---|---|
+| Git 仓库与提交 | 仓库 URL、完整 commit SHA |
+| 工作目录、城市 | `/data/evrptwd`、`chicago` |
+| 来源锁 | 首机生成，其他机器读取同一份 `sources.lock.json` |
+| 并发与分片 | 两个 worker。独占城市用 `0/1`，同城双机分别用 `0/2` 和 `1/2` |
+
+## 可复制的 prompt
+
+> 克隆指定仓库并检出指定提交。按 README 安装 Python 3.11 依赖和 osmium-tool。使用我指定的工作目录、城市和分片。直接从 SOURCES 中的发布机构下载原料，在本机裁剪和构造中间文件。第一台机器记录 OSM 发布日和来源锁，其他机器用同一发布日期和来源锁独立下载。先完成 11 城联合住宅户数校准，再为本机分配的城市构建并验证 Stage 1 CLE，执行 prepare-city 和 plan。记录 Git 提交、来源锁、城市计划的 SHA-256 和 Stage 1 日志。
+>
+> 用已登记的首个 Cus100 槽位试通正常生成、四矩阵恢复和绘图。开发城市选 train，Jacksonville 选 test3。汇报构造状态与恢复结果。正式批量任务获准后用 stage2 的 workers 和 shard 参数执行。中断后按相同命令和 seed 续跑，保留失败槽位与原因。全批用 audit 汇总各分片的已完成、缺失和重复槽位。
+
+每条命令和数据目录示例见[项目 README](../README.md)，输入列表和公开数据许可见[来源说明](SOURCES.zh-CN.md)。

@@ -58,7 +58,7 @@ def build(store, output):
         path = store.fetch(
             key,
             ENDPOINT,
-            post=lambda: requests.post(
+            post=lambda payload=payload: requests.post(
                 ENDPOINT,
                 data={"benchmark": "Public_AR_Current"},
                 files={"addressFile": ("addresses.csv", payload, "text/csv")},

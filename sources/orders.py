@@ -1,11 +1,45 @@
 """Derive the address-level fields actually consumed by the release generator."""
 
+import hashlib
+import json
+
 import pandas as pd
+import pyarrow.parquet as pq
 
 from evrptw_scenarios.marks import build_donor_artifact
-from stage2.common import PROJECT, read
+from stage2.common import PROJECT, read, write
 
 BASE = "https://amazon-last-mile-challenges.s3.us-west-2.amazonaws.com/almrrc2021/almrrc2021-data-training/model_build_inputs/"
+
+
+# Only fields read by Stage 2 enter this fingerprint. Row order binds donor indices.
+SOLVER_COLUMNS = {
+    "service.parquet": [
+        "donor_id",
+        "source_station_day_id",
+        "package_count",
+        "service_s",
+    ],
+    "windows.parquet": ["donor_id", "a", "b"],
+    "bundles.parquet": ["donor_id", "parcel_rows"],
+    "parcels.parquet": ["volume_cm3", "source_parcel_ref"],
+}
+
+
+def logical_hashes(catalog):
+    hashes = {}
+    encode = json.JSONEncoder(
+        ensure_ascii=True, allow_nan=False, separators=(",", ":")
+    ).encode
+    for filename, columns in SOLVER_COLUMNS.items():
+        h = hashlib.sha256()
+        h.update((encode(columns) + "\n").encode("ascii"))
+        parquet = pq.ParquetFile(catalog / filename)
+        for batch in parquet.iter_batches(batch_size=8192, columns=columns):
+            rows = zip(*(batch.column(i).to_pylist() for i in range(len(columns))))
+            h.update("".join(encode(row) + "\n" for row in rows).encode("ascii"))
+        hashes[filename] = h.hexdigest()
+    return hashes
 
 
 def order_tables(catalog):
@@ -63,15 +97,17 @@ def build(store, output):
         key: store.fetch(f"amazon/{key}.json", BASE + key + ".json", h)
         for key, h in ref["canonical_source_sha256"].items()
     }
-    record = build_donor_artifact(
+    build_donor_artifact(
         package_path=raw["package_data"],
         route_path=raw["route_data"],
         output_dir=output,
     )
-    if record["outputs_sha256"] != ref["canonical_outputs_sha256"]:
-        raise ValueError(
-            "Amazon catalog differs from the frozen r3 data. Check dependency versions."
-        )
     donors, windows = order_tables(output)
     donors.to_parquet(output / "service.parquet", index=False)
     windows.to_parquet(output / "windows.parquet", index=False)
+    fingerprints = logical_hashes(output)
+    if fingerprints != read(PROJECT / "config/amazon_solver_fields.json"):
+        raise ValueError(
+            "Rebuilt Amazon order values differ from the registered reference"
+        )
+    write(output / "solver_fields.json", fingerprints)

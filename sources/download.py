@@ -68,8 +68,15 @@ class Store:
                                 raise RuntimeError(
                                     f"{key}: publisher returned HTTP {response.status_code}"
                                 )
-                            if "text/html" in getattr(response, "headers", {}).get("Content-Type", "").lower():
-                                raise ValueError(f"{key}: expected source data, received HTML")
+                            if (
+                                "text/html"
+                                in getattr(response, "headers", {})
+                                .get("Content-Type", "")
+                                .lower()
+                            ):
+                                raise ValueError(
+                                    f"{key}: expected source data, received HTML"
+                                )
                             with tempfile.NamedTemporaryFile(
                                 dir=path.parent, delete=False
                             ) as f:

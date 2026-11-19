@@ -177,3 +177,87 @@ def test_download_and_replay_lock(tmp_path, monkeypatch):
     second.fetch("source", url).write_bytes(b"bad")
     with pytest.raises(ValueError, match="Cached source"):
         second.fetch("source", url)
+
+
+def test_order_reference_uses_values_and_row_order(tmp_path):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from sources.orders import logical_hashes
+
+    tables = {
+        "service": dict(
+            donor_id=["A", "B"],
+            source_station_day_id=["S", "S"],
+            package_count=[1, 1],
+            service_s=[8.0, 9.0],
+        ),
+        "windows": dict(donor_id=["B"], a=[0.0], b=[120.0]),
+        "bundles": dict(donor_id=["A", "B"], parcel_rows=[[0], [1]]),
+        "parcels": dict(volume_cm3=[100.0, 180.0], source_parcel_ref=["p0", "p1"]),
+    }
+    for k, v in tables.items():
+        pq.write_table(pa.table(v), tmp_path / (k + ".parquet"))
+    expected = logical_hashes(tmp_path)
+    for k, v in tables.items():
+        pq.write_table(
+            pa.table(v),
+            tmp_path / (k + ".parquet"),
+            compression="gzip",
+            row_group_size=1,
+        )
+    assert logical_hashes(tmp_path) == expected
+    p = tmp_path / "parcels.parquet"
+    pq.write_table(pa.table(tables["parcels"]).take([1, 0]), p)
+    assert logical_hashes(tmp_path)[p.name] != expected[p.name]
+
+
+def test_interrupted_stage1_component_rebuilds_in_place(tmp_path, monkeypatch):
+    from evrptw_cle import stage1_components as comp
+    from stage2.common import write
+
+    inventory = tmp_path / "inventory.json"
+    write(inventory, {})
+    project = {
+        "output": str(tmp_path),
+        "components": {
+            "inventory": str(inventory),
+            "road_sources": str(tmp_path),
+            "source_root": str(tmp_path),
+        },
+    }
+    base = tmp_path / "cities/chicago"
+    calls = []
+
+    def build(kind, **kwargs):
+        calls.append(kind)
+        (base / "roads").mkdir()
+        (base / "roads/attempt").write_text(str(len(calls)))
+        if len(calls) == 1:
+            raise OSError("interrupted")
+        return {"complete": True}
+
+    monkeypatch.setattr(comp, "build_stage1_noncustomer_component", build)
+    opts = dict(project=project, city="chicago", component="roads")
+    with pytest.raises(OSError, match="interrupted"):
+        comp.build_component(**opts)
+    assert comp.build_component(**opts) == {"complete": True}
+    assert (base / "roads/attempt").read_text() == "2"
+    assert next((tmp_path / "interrupted").rglob("attempt")).read_text() == "1"
+    assert not (base / ".building-roads").exists()
+
+
+def test_partial_request_refuses_mixed_city_dates(tmp_path):
+    from sources.prepare import prepare, source_code_hash, SPEC
+    from stage2.common import write
+
+    receipt = dict(
+        policy=dict(
+            source_code=source_code_hash(), spec=sha(SPEC), osm_date="2026-11-01"
+        ),
+        sources={},
+        outputs={},
+    )
+    write(tmp_path / "public/chicago/receipt.json", receipt)
+    with pytest.raises(ValueError, match="different OSM date"):
+        prepare(tmp_path, "cities", [], 1, "2026-11-02", None)
+    assert not (tmp_path / "public/sources.lock.json").exists()

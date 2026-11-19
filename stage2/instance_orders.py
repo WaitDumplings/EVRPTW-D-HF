@@ -23,25 +23,21 @@ def _load(catalog):
     if sha(profile_file) != method["order_profile"]["sha256"]:
         raise ValueError("Order profile digest mismatch")
     profile = json.loads(profile_file.read_text())
-    manifest = read(PROJECT / "config/manifest.json")
     if (
         sha(PROJECT / "config/manifest.json")
         != profile["sources"]["input_manifest"]["sha256"]
     ):
         raise ValueError("Changed Amazon reference")
     receipt = read(catalog / "receipt.json")
-    for name in (
-        "parcels.parquet",
-        "bundles.parquet",
-        "service.parquet",
-        "windows.parquet",
-    ):
-        actual = sha(catalog / name)
-        if actual != receipt["outputs"][name] or (
-            name in manifest["canonical_outputs_sha256"]
-            and actual != manifest["canonical_outputs_sha256"][name]
-        ):
+    from sources.orders import SOLVER_COLUMNS
+
+    for name in (*SOLVER_COLUMNS, "solver_fields.json"):
+        if sha(catalog / name) != receipt["outputs"][name]:
             raise ValueError("Changed Amazon catalog file: " + name)
+    if read(catalog / "solver_fields.json") != read(
+        PROJECT / "config/amazon_solver_fields.json"
+    ):
+        raise ValueError("Amazon solver fields differ from the registered reference")
     donors = pd.read_parquet(catalog / "service.parquet")
     windows = pd.read_parquet(catalog / "windows.parquet").set_index("donor_id")
     bundles = pd.read_parquet(

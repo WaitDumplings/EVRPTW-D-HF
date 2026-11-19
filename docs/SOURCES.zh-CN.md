@@ -10,7 +10,7 @@
 | [USACE National Structure Inventory](https://www.hec.usace.army.mil/confluence/nsi/technicalreferences/latest/api-reference-guide) | 逐县请求公开 `structures?fips=<county>&fmt=fs`，按 GeoJSON Text Sequence 读取 | 按陆域筛选原生点，按 fd_id 核对重复，保留住宅、非住宅、零户及缺失证据。接入建筑匹配和 11 城住宅户数校准 |
 | [AFDC / National Laboratory of the Rockies](https://developer.nlr.gov/docs/transportation/alt-fuel-stations-v1/) | 美国在运营、公众可用的电站 CSV 和同范围 EV charging units CSV | 绑定地点和设备，按当前下载的全国兼容端口重算缺功率时使用的加权中位数。地址级地点按 Census 核对，车辆兼容性和功率上限沿用 Stage 1 方法 |
 | [Census Geocoder](https://geocoding.geo.census.gov/geocoder/) | 将相关 AFDC 公共站的地址按批提交至官方地址匹配接口，接收地址匹配结果 | 对照回传的原地址和坐标；已具原生 GPS 的站使用 AFDC 位置 |
-| [Amazon Last Mile Routing Research Challenge](https://registry.opendata.aws/amazon-last-mile-challenges/) | 开放 S3 桶中官方 training 的 `route_data.json` 和 `package_data.json`，匿名 HTTPS 下载 | 重建有效整单、包裹、计划服务秒数及地址时间窗，按 donor ID 联合使用 |
+| [Amazon Last Mile Routing Research Challenge](https://registry.opendata.aws/amazon-last-mile-challenges/) | 开放 S3 桶中官方 training 的 `route_data.json` 和 `package_data.json`，匿名 HTTPS 下载 | 重建有效整单、包裹、计划服务秒数及地址时间窗，按 donor ID 联合使用。校验生成器读取的字段和行顺序，允许不同平台使用等价的 Parquet 压缩编码 |
 | [EPA 2023 NEI onroad](https://gaftp.epa.gov/Air/nei/2023/doc/TSD/onroadmobile-agencymovesinputs.html) | 生成阶段使用随代码版本固定的 7 州速度参数。州配置列出 EPA 统计源及推导口径 | Stage 1 将标定的速度比例用于实际道路。可运行 `PYTHONPATH=stage1_engine/src python stage1_engine/scripts/verify_state_speed_profiles.py` 从紧凑统计表复核系数 |
 
 客户起始组数的拟合系数、逐城住户概率、候选预算比例的经验分布、车辆和道路速度标定属于模型参数。仓库中 `config/candidate_ratio.csv` 只保留采样所需的经验原子标识、比例和累积概率。下载和运行无需项目方的输入压缩包、已有 CLE、实例或私有 API。
