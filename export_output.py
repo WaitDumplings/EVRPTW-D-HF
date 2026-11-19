@@ -7,10 +7,11 @@ import shutil
 import tempfile
 import zipfile
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 from evrptw_scenarios.cle_binding import cle_authority
-from export_instance import source_info
+from export_instance import release_info, source_info
 from instance_file import (
     RULES,
     file_header,
@@ -20,7 +21,16 @@ from instance_file import (
     write_instance,
 )
 from solver_parquet import PROBLEMS, from_restored, partition, source_nodes_and_info
-from stage2.common import CITIES, digest, lock, read, sha, shared_identity, write
+from stage2.common import (
+    CITIES,
+    digest,
+    lock,
+    public_split,
+    read,
+    sha,
+    shared_identity,
+    write,
+)
 
 
 def city_inventory(base, shared, city):
@@ -112,6 +122,7 @@ def publish_instance(source, output):
         task = from_restored(source)
     elif source.suffix == ".parquet":
         header, task = read_portable(source)
+        task = replace(task, info=release_info(task.info))
         expected = header["payload"]["cle"]
     else:
         from stage2.generate import restore
@@ -137,7 +148,7 @@ def verify_published_archive(source, target, binding):
         nodes, info = source_nodes_and_info(zipfile.Path(compact))
     header, existing = read_portable(target)
     if (
-        info != existing.info
+        info != release_info(existing.info)
         or not nodes.equals(existing.nodes)
         or header["payload"]["cle"] != binding
         or header["payload"]["rules"] != RULES
@@ -149,21 +160,24 @@ def verify_published_archive(source, target, binding):
 
 def publish_city_instances(work, output, city):
     """Publish certified slots from the sealed plan, including previously delivered files."""
+    from stage2.plan import instance_namespace
+
     plan_file = work / "plans" / (city + ".json")
     plan_id = sha(plan_file)
     release = read(plan_file.parent / "release.json")
     if release["plans_sha256"][city] != plan_id:
         raise ValueError(f"City plan disagrees with the release index: {city}")
     plan = read(plan_file)
+    namespace = instance_namespace(plan, plan_id)
     binding = verify_city(output / "CLE" / city, city, full=False)
     if binding["shared_sha256"] != plan["shared_sha256"]:
         raise ValueError(f"City plan and published CLE disagree: {city}")
     counts = {}
     for task in plan["tasks"]:
-        split, n = task["split"], task["n"]
+        split, n = public_split(city, task["split"]), task["n"]
         cell = counts.setdefault((split, n), Counter())
         cell["planned"] += 1
-        part = Path(city) / split / f"Cus{n}"
+        part = Path(city) / task["split"] / f"Cus{n}"
         slot = f"instance{task['slot']:04d}"
         receipt = work / "ledger" / part / slot / "result.json"
         if not receipt.is_file():
@@ -178,7 +192,7 @@ def publish_city_instances(work, output, city):
         if result["file"] != str(archive) or result["sha256"] != sha(source):
             raise ValueError(f"Certified archive differs from its ledger: {source}")
         identity = source_info(source)
-        name = digest([plan_id, task["task_key"], task["seed"]])[:24]
+        name = digest([namespace, task["task_key"], task["seed"]])[:24]
         if result["instance_id"] != name or identity != {
             "instance_id": name,
             "split": split,
@@ -186,11 +200,15 @@ def publish_city_instances(work, output, city):
             "customer_count": n,
         }:
             raise ValueError(f"Archive identity differs from its slot: {source}")
-        target = output / "instances" / part / (name + ".parquet")
+        target = output / "instances" / city / split / f"Cus{n}" / (name + ".parquet")
         if target.exists():
             verify_published_archive(source, target, binding)
             cell["reused"] += 1
         else:
+            previous = output / "instances" / part / (name + ".parquet")
+            if previous != target and previous.is_file():
+                verify_published_archive(source, previous, binding)
+                source = previous
             publish_instance(source, output)
             cell["published"] += 1
     return [
@@ -247,7 +265,9 @@ def verify_instance(path, restored):
     source = from_restored(restored)
     portable = read_instance(path)
     # Both readers verify the four matrix digests and the ordered node table.
-    if source.info != portable.info or not source.nodes.equals(portable.nodes):
+    if source.info != release_info(portable.info) or not source.nodes.equals(
+        portable.nodes
+    ):
         raise ValueError("Restored and portable instance inputs differ")
     result = {}
     for problem in PROBLEMS:

@@ -6,6 +6,7 @@ import json
 import tempfile
 import zipfile
 from contextlib import ExitStack
+from dataclasses import replace
 from functools import partial
 from itertools import groupby
 from pathlib import Path
@@ -13,7 +14,11 @@ from pathlib import Path
 import pyarrow.parquet as pq
 
 from solver_parquet import PROBLEMS, from_restored, load_problem, partition
-from stage2.common import read
+from stage2.common import public_split, read
+
+
+def release_info(info):
+    return {**info, "split": public_split(info["city"], info["split"])}
 
 
 def write_card(root, splits, problem):
@@ -58,7 +63,9 @@ def source_info(path):
     else:
         with zipfile.ZipFile(path) as z:
             info = json.loads(z.read("instance.json"))
-    return {k: info[k] for k in ("instance_id", "split", "city", "customer_count")}
+    return release_info(
+        {k: info[k] for k in ("instance_id", "split", "city", "customer_count")}
+    )
 
 
 def source_problem(path, work, info):
@@ -106,7 +113,8 @@ def write_dataset(records, out, problem, shard_bytes=256 << 20):
     if out.exists():
         raise FileExistsError(f"Output already exists: {out}")
     records = sorted(
-        records, key=lambda item: (partition(item[0]), item[0]["instance_id"])
+        ((release_info(info), load) for info, load in records),
+        key=lambda item: (partition(item[0]), item[0]["instance_id"]),
     )
     if not records:
         raise ValueError("Provide at least one instance")
@@ -130,6 +138,7 @@ def write_dataset(records, out, problem, shard_bytes=256 << 20):
                     stack.callback(writers[name].close)
                 for info, load in group:
                     view = load().view(problem)
+                    view = replace(view, info=release_info(view.info))
                     if (
                         view.info["instance_id"] != info["instance_id"]
                         or partition(view.info) != folder

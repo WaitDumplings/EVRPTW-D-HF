@@ -3,7 +3,7 @@
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from .common import digest, read, sha
+from .common import digest, public_split, read, sha
 
 
 def audit(plan, outputs):
@@ -14,7 +14,12 @@ def audit(plan, outputs):
     counts = defaultdict(Counter)
     issues = []
     for task in data["tasks"]:
-        key = (task["city"], task["split"], task["n"], task["day_type"])
+        key = (
+            task["city"],
+            public_split(task["city"], task["split"]),
+            task["n"],
+            task["day_type"],
+        )
         cell = counts[key]
         cell["planned"] += 1
         part = Path(task["city"]) / task["split"] / f"Cus{task['n']}"

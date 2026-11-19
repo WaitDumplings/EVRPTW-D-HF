@@ -157,10 +157,10 @@ def test_global_panel():
     days = Counter((r["split"], r["n"]) for r in all_rows if r["day_type"] == "weekday")
     assert [days["train", n] for n in [100, 500, 1000]] == [7143, 1429, 714]
     assert days["xs", 2000] == 357 and all(
-        days["val", n] == 214 and days["test3", n] == 357 for n in [100, 500, 1000]
+        days["val", n] == 214 and days["test2", n] == 357 for n in [100, 500, 1000]
     )
     assert all(
-        (r["city"] == "jacksonville") == (r["split"] == "test3") for r in all_rows
+        (r["city"] == "jacksonville") == (r["split"] == "test2") for r in all_rows
     )
 
 
@@ -389,7 +389,9 @@ def test_r1_local_access_context_with_policy(tmp_path):
 
 
 def test_release_index(tmp_path):
-    from stage2.plan import save_plan, seal_plans
+    from stage2.audit import audit
+    from stage2.common import digest
+    from stage2.plan import instance_namespace, save_plan, seal_plans
     import pytest
 
     loc = pd.DataFrame({"location_type": ["depot"], "bg_geoid": ["A"]}, index=["d1"])
@@ -402,6 +404,20 @@ def test_release_index(tmp_path):
         )
         loc.to_parquet(base / "locations.parquet")
         save_plan(base, folder / (city + ".json"), 20261103, "2026-11-02", 28)
+    # Simulate a Jacksonville panel archived before the public split was renamed.
+    jax = folder / "jacksonville.json"
+    legacy = read(jax)
+    namespace = instance_namespace(legacy, sha(jax))
+    assert {r["split"] for r in legacy["tasks"]} == {"test2"}
+    for task in legacy["tasks"]:
+        task["split"] = "test3"
+    legacy["tasks_sha256"] = digest(legacy["tasks"])
+    write(jax, legacy)
+    legacy_hash = sha(jax)
+    assert namespace == legacy_hash
+    save_plan(tmp_path / "shared/jacksonville", jax, 20261103, "2026-11-02", 28)
+    assert sha(jax) == legacy_hash
+    assert {r["split"] for r in audit(jax, [tmp_path])["rows"]} == {"test2"}
     index = seal_plans(folder)
     assert index["task_count"] == 17400 and len(index["plans_sha256"]) == 11
     record = read(folder / "chicago.json")

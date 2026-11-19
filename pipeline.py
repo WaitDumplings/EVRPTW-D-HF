@@ -95,7 +95,9 @@ def cli(argv=None):
     b.add_argument("--city", required=True, choices=CITIES)
     b.add_argument("--workers", type=positive, default=1)
     b.add_argument(
-        "--split", choices=["train", "val", "test1", "test3", "xs", "custom"]
+        "--split",
+        choices=["train", "val", "test1", "test2", "test3", "xs", "custom"],
+        metavar="{train,val,test1,test2,xs,custom}",
     )
     b.add_argument("--n", type=int)
     b.add_argument("--limit", type=positive)

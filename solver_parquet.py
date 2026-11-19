@@ -156,6 +156,7 @@ class Problem:
 
 def source_nodes_and_info(folder):
     """Read the common solver inputs from a restored directory or compact ZIP root."""
+    from stage2.common import public_split
     from stage2.exchange import FIELDS
 
     def read(path):
@@ -204,7 +205,7 @@ def source_nodes_and_info(folder):
         "instance_id": inst["instance_id"],
         "problem_type": "evrptw",
         "city": inst["city"],
-        "split": inst["split"],
+        "split": public_split(inst["city"], inst["split"]),
         "service_date": inst["date"],
         "day_type": inst["day_type"],
         "seed": inst["seed"],

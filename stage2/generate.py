@@ -38,7 +38,7 @@ PAYLOAD = (
 )
 
 
-def generate(task, day, catalog, shared_hash, plan_id, out):
+def generate(task, day, catalog, shared_hash, plan_id, out, namespace=None):
     try:
         f = activate_customers(
             city=task["city"],
@@ -91,7 +91,7 @@ def generate(task, day, catalog, shared_hash, plan_id, out):
     check_witness(witness, nodes, arrays, veh)
     inst = dict(
         **task,
-        instance_id=digest([plan_id, task["task_key"], task["seed"]])[:24],
+        instance_id=digest([namespace or plan_id, task["task_key"], task["seed"]])[:24],
         plan_sha256=plan_id,
         schema="evrptwd_instance_v1",
         vehicle_file="vehicle.json",
@@ -106,6 +106,8 @@ def generate(task, day, catalog, shared_hash, plan_id, out):
         matrix_hashes=array_hashes(arrays, len(nodes)),
         routing=meta,
     )
+    if namespace is not None and namespace != plan_id:
+        inst["instance_id_namespace_sha256"] = namespace
     files = {
         k: encode(v)
         for k, v in [

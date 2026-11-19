@@ -58,11 +58,13 @@ A 留存公开来源锁 `public/sources.lock.json`、联合校准和 11 城回�
 
 ## Server B
 
-接收 A 的发布索引、订单库和本机四城 CLE、城市计划。设置 `WORK` 和 `OUTPUT` 为本机对应的绝对目录，设置 `CITIES=(new-york phoenix dallas jacksonville)`。Jacksonville 只生成 `test3`。执行“工作机接入”和“逐城生成和导出”，共 6,270 个槽位。
+接收 A 的发布索引、订单库和本机四城 CLE、城市计划。设置 `WORK` 和 `OUTPUT` 为本机对应的绝对目录，设置 `CITIES=(new-york phoenix dallas jacksonville)`。Jacksonville 只生成 `test2`。执行“工作机接入”和“逐城生成和导出”，共 6,270 个槽位。
 
 ## Server C
 
 接收 A 的发布索引、订单库和本机四城 CLE、城市计划。设置 `WORK` 和 `OUTPUT` 为本机对应的绝对目录，设置 `CITIES=(los-angeles philadelphia san-antonio san-diego)`。执行“工作机接入”和“逐城生成和导出”，共 6,360 个槽位。
+
+Jacksonville 的发布路径为 `instances/jacksonville/test2/Cus<N>/`。已有旧版城市计划时保留原文件和台账，切到本次提交后直接续跑。任务键沿用原登记值，以便同一任务保留 seed 和实例 ID。旧计划和 ZIP 中的 `test3` 在导出和审计时归入 `test2`。如果已按旧名导出过部分文件，交付时仅收录 `test2/` 下的 Parquet。
 
 ### 工作机接入（B、C）
 

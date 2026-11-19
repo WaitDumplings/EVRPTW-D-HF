@@ -2,6 +2,8 @@
 
 from collections import Counter
 from datetime import date, timedelta
+import hashlib
+import json
 import pandas as pd
 from .common import shared_identity
 from .common import (
@@ -10,7 +12,8 @@ from .common import (
     BUDGET,
     DEV,
     PROJECT,
-    code_id,
+    panel_code_id,
+    public_split,
     digest,
     lock,
     read,
@@ -23,15 +26,30 @@ QUOTA = {
     "val": {100: 30, 500: 30, 1000: 30},
     "test1": {100: 50, 500: 50, 1000: 50},
     "xs": {2000: 50},
-    "test3": {100: 500, 500: 500, 1000: 500},
+    "test2": {100: 500, 500: 500, 1000: 500},
 }
 WEEKDAYS = {
     "train": {100: 7143, 500: 1429, 1000: 714},
     "val": dict.fromkeys([100, 500, 1000], 214),
     "test1": dict.fromkeys([100, 500, 1000], 357),
-    "test3": dict.fromkeys([100, 500, 1000], 357),
+    "test2": dict.fromkeys([100, 500, 1000], 357),
     "xs": {2000: 357},
 }
+
+
+def instance_namespace(plan, plan_sha):
+    """Use the original panel identity for immutable instance IDs after a split rename."""
+    if plan.get("city") != "jacksonville" or not any(
+        t["split"] == "test2" for t in plan["tasks"]
+    ):
+        return plan_sha
+    tasks = [
+        dict(t, split="test3") if t["split"] == "test2" else t for t in plan["tasks"]
+    ]
+    original = dict(plan, tasks=tasks, tasks_sha256=digest(tasks))
+    # Match the on-disk preregistration written by stage2.common.write.
+    raw = json.dumps(original, sort_keys=True, indent=2, allow_nan=False) + "\n"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def depot_order(loc, seed, city):
@@ -65,11 +83,13 @@ def plan_tasks(city, loc, seed, start, days, custom=None):
     rows = []
     quotas = QUOTA if custom is None else {"custom": {custom[0]: custom[2]}}
     for split, sizes in quotas.items():
-        if custom is None and (city == "jacksonville") != (split == "test3"):
+        if custom is None and (city == "jacksonville") != (split == "test2"):
             continue
+        # This token is part of the original seed and slot identity.
+        stream_split = "test3" if split == "test2" else split
         for n, count in sizes.items():
             total = WEEKDAYS[split][n] if custom is None else (5 * count + 3) // 7
-            if split in {"custom", "test3"}:
+            if split in {"custom", "test2"}:
                 weekday = total
             else:
                 order = sorted(
@@ -78,7 +98,7 @@ def plan_tasks(city, loc, seed, start, days, custom=None):
                 weekday = total // 10 + (order.index(city) < total % 10)
             ranked = sorted(
                 range(count),
-                key=lambda i: digest([seed, city, split, n, "day_type", i]),
+                key=lambda i: digest([seed, city, stream_split, n, "day_type", i]),
             )
             wd = set(ranked[:weekday])
             dayno = {"weekday": 0, "weekend": 0}
@@ -87,7 +107,7 @@ def plan_tasks(city, loc, seed, start, days, custom=None):
                 dates = by_day[kind]
                 d = dates[dayno[kind] % len(dates)]
                 dayno[kind] += 1
-                key = [city, split, n, i + 1, depots[i % len(depots)], d, kind]
+                key = [city, stream_split, n, i + 1, depots[i % len(depots)], d, kind]
                 rows.append(
                     dict(
                         city=city,
@@ -117,7 +137,7 @@ def save_plan(shared, path, seed, start, days, custom=None):
         calendar_days=days,
         root_seed=seed,
         runtime=runtime_contract(),
-        code_sha256=code_id(),
+        code_sha256=panel_code_id(),
         shared_sha256=shared_identity(shared),
         input_vintage=read(shared / "shared.json").get("vintage"),
         calibration_sha256=read(shared / "shared.json").get("calibration"),
@@ -130,10 +150,17 @@ def save_plan(shared, path, seed, start, days, custom=None):
     )
     plan["tasks_sha256"] = digest(plan["tasks"])
     with lock(path.with_suffix(".lock")):
-        if path.exists() and read(path) != plan:
-            raise ValueError(
-                "A different preregistered panel exists; choose a fresh path"
-            )
+        if path.exists():
+            existing = read(path)
+            if existing["tasks_sha256"] == digest(existing["tasks"]):
+                for task in existing["tasks"]:
+                    task["split"] = public_split(city, task["split"])
+                existing["tasks_sha256"] = digest(existing["tasks"])
+            if existing != plan:
+                raise ValueError(
+                    "A different preregistered panel exists; choose a fresh path"
+                )
+            return len(plan["tasks"])
         write(path, plan)
     return len(plan["tasks"])
 
@@ -175,11 +202,14 @@ def seal_plans(folder):
         quotas = {
             (s, n): count
             for s, dd in QUOTA.items()
-            if (city == "jacksonville") == (s == "test3")
+            if (city == "jacksonville") == (s == "test2")
             for n, count in dd.items()
         }
 
-        if Counter((t["split"], t["n"]) for t in panel["tasks"]) != quotas:
+        if (
+            Counter((public_split(city, t["split"]), t["n"]) for t in panel["tasks"])
+            != quotas
+        ):
             raise ValueError("Release quotas differ: " + city)
         hashes[city] = sha(path)
         total += len(panel["tasks"])

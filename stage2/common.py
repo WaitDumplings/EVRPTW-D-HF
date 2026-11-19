@@ -63,6 +63,17 @@ def code_id():
     return digest([(str(p.relative_to(PROJECT)), sha(p)) for p in files])
 
 
+def panel_code_id():
+    """Keep preregistered slot IDs across a reviewed split-label-only code revision."""
+    current = code_id()
+    aliases = read(PROJECT / "stage2/panel_code_aliases.json")
+    return aliases.get(current, current)
+
+
+def public_split(city, split):
+    return "test2" if city == "jacksonville" and split == "test3" else split
+
+
 class MethodFailure(Exception):
     """The fixed task is outside the support of the registered construction method."""
 

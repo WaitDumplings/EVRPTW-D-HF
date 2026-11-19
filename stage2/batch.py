@@ -13,8 +13,9 @@ import tempfile
 import traceback
 
 from .city import CityDay, verify_shared
-from .common import PROJECT, code_id, digest, lock, read, sha, write
+from .common import PROJECT, panel_code_id, public_split, digest, lock, read, sha, write
 from .generate import generate
+from .plan import instance_namespace
 
 
 _worker_day = None
@@ -36,7 +37,7 @@ def _day(shared, kind):
 
 
 def one(args):
-    task, shared, catalog, out, plan_id, shared_hash, retry_method = args
+    task, shared, catalog, out, plan_id, shared_hash, retry_method, namespace = args
     name = f"instance{task['slot']:04d}"
     sub = Path(task["city"]) / task["split"] / f"Cus{task['n']}"
     history = out / "ledger" / sub / name
@@ -80,7 +81,9 @@ def one(args):
             with tempfile.TemporaryDirectory(dir=history) as tmp:
                 product = Path(tmp) / "instance.zip"
                 day = _day(shared, task["day_type"])
-                result = generate(task, day, catalog, shared_hash, plan_id, product)
+                result = generate(
+                    task, day, catalog, shared_hash, plan_id, product, namespace
+                )
                 if product.is_file():
                     prefix = (
                         "instances"
@@ -123,7 +126,7 @@ def run(
     if (
         data["runtime"] != runtime_contract()
         or data["tasks_sha256"] != digest(data["tasks"])
-        or data["code_sha256"] != code_id()
+        or data["code_sha256"] != panel_code_id()
         or data["shared_sha256"] != shared_hash
         or data["city"] != verify_shared(shared)["city"]
         or data["resource_sha256"]
@@ -139,7 +142,11 @@ def run(
     tasks = [
         t
         for t in data["tasks"]
-        if (split is None or t["split"] == split) and (n is None or t["n"] == n)
+        if (
+            split is None
+            or public_split(t["city"], t["split"]) == public_split(t["city"], split)
+        )
+        and (n is None or t["n"] == n)
     ]
     if not tasks:
         raise ValueError(
@@ -152,8 +159,9 @@ def run(
         raise ValueError("Shard must satisfy 0 <= index < count")
     tasks = [t for t in tasks if t["serial"] % total == index]
     plan_id = sha(plan)
+    namespace = instance_namespace(data, plan_id)
     jobs = [
-        (t, shared, catalog, out, plan_id, shared_hash, retry_method)
+        (t, shared, catalog, out, plan_id, shared_hash, retry_method, namespace)
         for t in sorted(tasks, key=lambda t: (t["day_type"], t["depot"], t["serial"]))
     ]
     if workers == 1:
