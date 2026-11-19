@@ -261,3 +261,23 @@ def test_partial_request_refuses_mixed_city_dates(tmp_path):
     with pytest.raises(ValueError, match="different OSM date"):
         prepare(tmp_path, "cities", [], 1, "2026-11-02", None)
     assert not (tmp_path / "public/sources.lock.json").exists()
+
+
+def test_partial_fetch_preserves_its_input_lock(tmp_path):
+    from sources.prepare import prepare
+    from stage2.common import read, write
+
+    ref = tmp_path / "public/sources.lock.json"
+    content = {
+        "schema": "evrptwd_public_source_lock_v1",
+        "files": {
+            "still-needed": {
+                "url": "https://example.org/file",
+                "sha256": "a" * 64,
+                "bytes": 1,
+            }
+        },
+    }
+    write(ref, content)
+    prepare(tmp_path, "cities", [], 1, "latest", ref)
+    assert read(ref) == content

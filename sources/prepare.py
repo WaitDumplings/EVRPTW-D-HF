@@ -2,6 +2,7 @@
 
 from concurrent.futures import ProcessPoolExecutor
 from datetime import date
+from functools import lru_cache
 import os
 from pathlib import Path
 import shutil
@@ -12,10 +13,24 @@ from .download import Store
 SPEC = PROJECT / "config/public_sources.json"
 
 
+@lru_cache(maxsize=1)
 def source_code_hash():
-    return digest(
-        [(p.name, sha(p)) for p in sorted(Path(__file__).parent.glob("*.py"))]
-    )
+    # Extraction uses shared Stage 1 classifiers and the Amazon donor builder.
+    # Keep their code and versioned rules in the preparation cache identity.
+    files = []
+    for folder in (
+        "sources",
+        "evrptw_scenarios",
+        "stage1_engine/src",
+        "stage1_engine/configs",
+        "config",
+    ):
+        files.extend(
+            p
+            for p in (PROJECT / folder).rglob("*")
+            if p.is_file() and p.suffix in {".py", ".json", ".sql"}
+        )
+    return digest([(str(p.relative_to(PROJECT)), sha(p)) for p in sorted(files)])
 
 
 def part(work, name, osm_date, expected):
@@ -191,10 +206,16 @@ def prepare(work, only, cities, workers, osm_date, lockfile):
                 records.update(sources)
         if all((root / n / "receipt.json").is_file() for n in [*CITIES, "afdc"]):
             make_inventory(work)
-        write(
-            root / "sources.lock.json",
-            dict(schema="evrptwd_public_source_lock_v1", files=records),
+        lock_target = root / "sources.lock.json"
+        # A host may put its reference lock at the normal output path and fetch
+        # only one component first. Its outstanding entries are still needed.
+        reusing_reference = (
+            lockfile is not None and Path(lockfile).resolve() == lock_target.resolve()
         )
+        if not reusing_reference:
+            write(
+                lock_target, dict(schema="evrptwd_public_source_lock_v1", files=records)
+            )
     print("Source lock:", root / "sources.lock.json")
 
 
