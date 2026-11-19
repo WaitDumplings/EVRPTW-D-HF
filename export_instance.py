@@ -51,6 +51,10 @@ def write_card(root, splits, problem):
 def source_info(path):
     if path.is_dir():
         info = read(path / "instance.json")
+    elif path.suffix == ".parquet":
+        from instance_file import file_header
+
+        info = file_header(path)["payload"]["instance"]
     else:
         with zipfile.ZipFile(path) as z:
             info = json.loads(z.read("instance.json"))
@@ -60,6 +64,10 @@ def source_info(path):
 def source_problem(path, work, info):
     if path.is_dir():
         return from_restored(path)
+    if path.suffix == ".parquet":
+        from instance_file import read_instance
+
+        return read_instance(path)
     from stage2.generate import restore
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -138,7 +146,10 @@ def write_dataset(records, out, problem, shard_bytes=256 << 20):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "inputs", nargs="*", type=Path, help="Restored directories or compact ZIPs"
+        "inputs",
+        nargs="*",
+        type=Path,
+        help="Portable Parquet files, restored directories or compact ZIPs",
     )
     parser.add_argument(
         "--input-list",

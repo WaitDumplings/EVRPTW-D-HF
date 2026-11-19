@@ -11,19 +11,23 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.dataset as ds
 
-from stage2.common import digest, read
-from stage2.exchange import FIELDS, KEYS, array_hashes
-
 MATRICES = {
     "cvrp": ("shortest_distance_m",),
     "vrptw": ("shortest_distance_m", "shortest_distance_time_s"),
-    "evrptw": KEYS,
+    "evrptw": (
+        "shortest_distance_m",
+        "shortest_distance_time_s",
+        "fastest_time_distance_m",
+        "fastest_time_s",
+    ),
 }
 PROBLEMS = tuple(MATRICES)
+BASIC_FIELDS = ("node_idx", "location_id", "type", "lon", "lat", "demand_cm3")
+TIME_FIELDS = (*BASIC_FIELDS, "ready_s", "due_s", "service_s")
 NODE_FIELDS = {
-    "cvrp": ("node_idx", "location_id", "type", "lon", "lat", "demand_cm3"),
-    "vrptw": tuple(k.lower() for k in FIELDS[:-1]),
-    "evrptw": tuple(k.lower() for k in FIELDS),
+    "cvrp": BASIC_FIELDS,
+    "vrptw": TIME_FIELDS,
+    "evrptw": (*TIME_FIELDS, "charge_kw"),
 }
 INFO_SCHEMA = pa.schema(
     [
@@ -56,9 +60,20 @@ NODE_SCHEMA = pa.schema(
         ("node_idx", pa.int32()),
         ("location_id", pa.string()),
         ("type", pa.string()),
-        *((k.lower(), pa.float64()) for k in FIELDS[3:]),
+        *((k, pa.float64()) for k in NODE_FIELDS["evrptw"][3:]),
     ]
 )
+
+
+def json_sha256(value):
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def hashes(arrays):
@@ -116,7 +131,7 @@ class Problem:
             station_count=n - 1 - self.info["customer_count"],
             vehicle_json=json.dumps(vehicle, sort_keys=True),
             matrix_sha256_json=json.dumps(hashes(arrays), sort_keys=True),
-            nodes_sha256=digest(nodes.to_pylist()),
+            nodes_sha256=json_sha256(nodes.to_pylist()),
         )
         return Problem(info, nodes, arrays)
 
@@ -140,6 +155,9 @@ class Problem:
 
 
 def from_restored(folder):
+    from stage2.common import read
+    from stage2.exchange import FIELDS, array_hashes
+
     folder = Path(folder)
     inst = read(folder / "instance.json")
     if (
@@ -206,7 +224,7 @@ def from_restored(folder):
         "source_shared_sha256": inst.get("shared_sha256"),
         "vehicle_json": json.dumps(vehicle, sort_keys=True),
         "matrix_sha256_json": json.dumps(inst["matrix_hashes"], sort_keys=True),
-        "nodes_sha256": digest(nodes.to_pylist()),
+        "nodes_sha256": json_sha256(nodes.to_pylist()),
     }
     return Problem(info, nodes, arrays)
 
@@ -233,38 +251,56 @@ def load_problem(root, instance_id, problem="evrptw"):
     if PROBLEMS.index(problem) > PROBLEMS.index(info["problem_type"]):
         raise ValueError(f"Cannot construct {problem} from {info['problem_type']}")
     folder = partition(info)
-    n = info["node_count"]
     nodes = (
         ds.dataset(root / "nodes" / folder, format="parquet")
         .to_table(filter=match)
         .sort_by("node_idx")
     )
-    if (
-        nodes["node_idx"].to_pylist() != list(range(n))
-        or nodes["type"].to_pylist()
-        != ["depot"]
-        + ["customer"] * info["customer_count"]
-        + ["charging"] * info["station_count"]
-        or len(set(nodes["location_id"].to_pylist())) != n
-        or nodes["location_id"][0].as_py() != info["depot_id"]
-        or digest(nodes.to_pylist()) != info["nodes_sha256"]
-    ):
-        raise ValueError("Invalid Parquet node indices, IDs or roles")
     keys = MATRICES[problem]
     rows = (
         ds.dataset(root / "matrix_rows" / folder, format="parquet")
         .to_table(columns=["from_idx", *keys], filter=match)
         .sort_by("from_idx")
     )
+    return decode_problem(info, nodes, rows, problem)
+
+
+def validate_nodes(info, nodes):
+    n = info["node_count"]
+    if (
+        nodes["node_idx"].to_pylist() != list(range(n))
+        or nodes["type"].to_pylist()
+        != ["depot"]
+        + ["customer"] * info["customer_count"]
+        + ["charging"] * info["station_count"]
+        or set(nodes["instance_id"].to_pylist()) != {info["instance_id"]}
+        or len(set(nodes["location_id"].to_pylist())) != n
+        or nodes["location_id"][0].as_py() != info["depot_id"]
+        or json_sha256(nodes.to_pylist()) != info["nodes_sha256"]
+    ):
+        raise ValueError("Invalid Parquet node indices, IDs or roles")
+
+
+def decode_problem(info, nodes, rows, problem):
+    n = info["node_count"]
+    keys = MATRICES[problem]
+    validate_nodes(info, nodes)
     if rows["from_idx"].to_pylist() != list(range(n)):
         raise ValueError("Invalid matrix origin indices")
     arrays = {}
     expected = json.loads(info["matrix_sha256_json"])
     for k in keys:
         col = rows[k].combine_chunks()
-        if col.null_count or not np.all(np.diff(col.offsets.to_numpy()) == n):
+        if (
+            col.type != pa.list_(pa.float64())
+            or col.null_count
+            or col.values.null_count
+            or not np.all(np.diff(col.offsets.to_numpy()) == n)
+        ):
             raise ValueError(f"Invalid road matrix row lengths for {k}")
         a = col.flatten().to_numpy().reshape(n, n)
+        if not np.isfinite(a).all() or (a < 0).any() or a.diagonal().any():
+            raise ValueError(f"Invalid road costs for {k}")
         if hashes({k: a})[k] != expected[k]:
             raise ValueError(f"Parquet matrix hash mismatch for {k}")
         arrays[k] = a

@@ -8,7 +8,7 @@ import pytest
 
 from export_instance import write_dataset
 from solver_parquet import PROBLEMS, from_restored, load_problem
-from stage2.common import read, write
+from stage2.common import read, sha, write
 from stage2.exchange import FIELDS, KEYS, array_hashes, node_text
 
 
@@ -150,3 +150,59 @@ def test_read_detects_changed_values(tmp_path):
     )
     with pytest.raises(ValueError, match="Parquet node"):
         load_problem(root, "a", "cvrp")
+
+
+def test_portable_solver_file_relocation_reencoding_and_raw_output(tmp_path):
+    from export_instance import source_info, source_problem
+    from export_output import verify_instance
+    from instance_file import file_header, read_instance, unpack, write_instance
+
+    task, matrices = example(tmp_path / "source")
+    task.info["source_shared_sha256"] = "a" * 64
+    meta = tmp_path / "source/instance.json"
+    write(meta, {**read(meta), "shared_sha256": "a" * 64})
+    binding = {
+        "city": "chicago",
+        "shared_sha256": "a" * 64,
+        "cle_manifest_sha256": "b" * 64,
+        "calibration_sha256": "c" * 64,
+    }
+    path = tmp_path / "isolated" / "renamed.parquet"
+    write_instance(path, task, binding)
+    header = file_header(path)
+    table = pq.read_table(path).take(pa.array([3, 1, 0, 2]))
+    pq.write_table(table, path, compression="snappy")
+    before = path.read_bytes()
+    write_instance(path, task, binding)
+    assert path.read_bytes() == before and file_header(path) == header
+    assert verify_instance(path, tmp_path / "source")["customers"] == 2
+    assert source_info(path)["instance_id"] == task.info["instance_id"]
+    assert source_problem(path, tmp_path / "no-work", source_info(path)).nodes.equals(
+        task.nodes
+    )
+    for mode in PROBLEMS:
+        solver = read_instance(path, mode)
+        n = solver.info["node_count"]
+        assert solver.nodes.equals(task.view(mode).nodes)
+        target = tmp_path / mode
+        unpack(path, target, mode)
+        raw = read(target / "instance.json")
+        assert (
+            raw["cle"] == binding
+            and raw["source_content_sha256"] == header["content_sha256"]
+        )
+
+        assert all(
+            sha(target / name) == value for name, value in raw["files_sha256"].items()
+        )
+        for key, array in solver.matrices.items():
+            descriptor = raw["matrices"][key]
+            assert array.tobytes() == matrices[key][:n, :n].tobytes()
+            assert (target / descriptor["file"]).read_bytes() == array.astype(
+                "<f8"
+            ).tobytes()
+    with pytest.raises(ValueError, match="another city"):
+        write_instance(path, task, {**binding, "city": "dallas"})
+    with pytest.raises(ValueError, match="already published"):
+        write_instance(path, task, {**binding, "cle_manifest_sha256": "f" * 64})
+    assert path.read_bytes() == before

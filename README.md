@@ -63,6 +63,10 @@ python pipeline.py --work "$WORK" restore "$F" --out "$WORK/restored/chicago-ins
 
 每例包含按 depot、客户、CS 排列的 `nodes.txt`，每行给出地点 ID、经纬度、需求、服务时间、时间窗和充电有效功率。`vehicle.json` 保存车辆参数，`orders.json` 等记录逐址订单、选站和见证。恢复命令使用本城 `shared/chicago/` 重建 `costs.npz` 中的四个有向矩阵，并验证哈希。两对矩阵分别给出最短距离路径和最快路径各自的里程与时间。未获见证的实例写入 `uncertified/`，生成失败写入原任务台账。生成阶段记录的路线见证采用不限车数的设置。
 
+## 交给其他求解器
+
+用 `export_output.py` 将已验收城市放在 `output/CLE/<city>/`，将每个实例放在 `output/instances/<city>/<split>/Cus<N>/<instance_id>.parquet`。矩阵求解器可以只复制一个 Parquet；需要底层道路的求解器再复制该城市的 CLE。独立文件同时支持 CVRP、VRPTW 和 EVRPTW，以及不依赖 Arrow 的 C++ 二进制读取。[目录、格式与命令](docs/OUTPUT.zh-CN.md)
+
 ## 导出 CVRP、VRPTW 和 EVRPTW
 
 从一份已恢复的任务生成可浏览的 Parquet 数据集。三种问题共用一个 `instance_id`，客户顺序和需求相同。默认写完整 EVRPTW，CVRP、VRPTW 可在读取时选取，也可独立导出。
