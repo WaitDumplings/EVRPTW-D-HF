@@ -281,3 +281,31 @@ def test_partial_fetch_preserves_its_input_lock(tmp_path):
     write(ref, content)
     prepare(tmp_path, "cities", [], 1, "latest", ref)
     assert read(ref) == content
+
+
+def test_source_lock_supplies_snapshot_date(tmp_path):
+    from sources.prepare import prepare, source_code_hash, SPEC
+    from stage2.common import read, write
+
+    ref = tmp_path / "reference.json"
+    write(
+        ref,
+        {
+            "schema": "evrptwd_public_source_lock_v1",
+            "files": {},
+            "osm_date": "2026-11-01",
+        },
+    )
+    write(
+        tmp_path / "public/chicago/receipt.json",
+        dict(
+            policy=dict(
+                source_code=source_code_hash(), spec=sha(SPEC), osm_date="2026-11-01"
+            ),
+            sources={},
+        ),
+    )
+    prepare(tmp_path, "cities", [], 1, None, ref)
+    assert read(tmp_path / "public/sources.lock.json")["osm_date"] == "2026-11-01"
+    with pytest.raises(ValueError, match="conflicts"):
+        prepare(tmp_path, "cities", [], 1, "2026-11-02", ref)

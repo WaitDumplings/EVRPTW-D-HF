@@ -161,11 +161,15 @@ def make_inventory(work):
 
 
 def prepare(work, only, cities, workers, osm_date, lockfile):
-    if osm_date != "latest":
-        date.fromisoformat(osm_date)
     expected = read(lockfile) if lockfile else None
     if expected and expected.get("schema") != "evrptwd_public_source_lock_v1":
         raise ValueError("Unknown source lock")
+    reference_date = (expected or {}).get("osm_date")
+    osm_date = osm_date or reference_date or "latest"
+    if osm_date != "latest":
+        date.fromisoformat(osm_date)
+    if reference_date and osm_date != reference_date:
+        raise ValueError("Requested OSM date conflicts with the supplied source lock")
     names = list(cities) if only in ("all", "stage1", "cities") else []
     if only in ("stage1", "all", "afdc"):
         names.append("afdc")
@@ -178,6 +182,7 @@ def prepare(work, only, cities, workers, osm_date, lockfile):
     root = work / "public"
     with lock(root / "locks" / "index"):
         records = {}
+        city_dates = set()
         for n in [*CITIES, "afdc", "amazon"]:
             if (root / n / "receipt.json").exists():
                 receipt = read(root / n / "receipt.json")
@@ -194,6 +199,8 @@ def prepare(work, only, cities, workers, osm_date, lockfile):
                     and policy["osm_date"] != osm_date
                 ):
                     raise ValueError(f"Prepared city uses a different OSM date: {n}")
+                if n in CITIES:
+                    city_dates.add(policy["osm_date"])
                 sources = receipt["sources"]
                 if any(k in records and records[k] != v for k, v in sources.items()):
                     raise ValueError("Conflicting source digests between components")
@@ -204,6 +211,8 @@ def prepare(work, only, cities, workers, osm_date, lockfile):
                         f"Prepared component conflicts with source lock: {n}"
                     )
                 records.update(sources)
+        if len(city_dates) > 1:
+            raise ValueError("Prepared cities use different OSM dates")
         if all((root / n / "receipt.json").is_file() for n in [*CITIES, "afdc"]):
             make_inventory(work)
         lock_target = root / "sources.lock.json"
@@ -214,7 +223,12 @@ def prepare(work, only, cities, workers, osm_date, lockfile):
         )
         if not reusing_reference:
             write(
-                lock_target, dict(schema="evrptwd_public_source_lock_v1", files=records)
+                lock_target,
+                dict(
+                    schema="evrptwd_public_source_lock_v1",
+                    osm_date=next(iter(city_dates), None),
+                    files=records,
+                ),
             )
     print("Source lock:", root / "sources.lock.json")
 

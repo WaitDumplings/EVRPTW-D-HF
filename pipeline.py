@@ -44,7 +44,8 @@ def cli(argv=None):
     fetch.add_argument("--city", nargs="+", choices=CITIES, default=list(CITIES))
     fetch.add_argument("--workers", type=positive, default=1)
     fetch.add_argument(
-        "--osm-date", default="latest", help="Geofabrik snapshot YYYY-MM-DD, or latest"
+        "--osm-date",
+        help="Geofabrik snapshot YYYY-MM-DD or latest (default: date in source lock, otherwise latest)",
     )
     fetch.add_argument(
         "--source-lock",

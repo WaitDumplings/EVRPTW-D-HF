@@ -28,7 +28,7 @@ python pipeline.py --work "$WORK" stage2 --city "$CITY" --split train --n 100 --
 
 第一条 `sources` 默认下载和处理全部 11 城的 Stage 1 来源及公共 Amazon 订单库。多个城市用子进程并行。住宅户数的邻居估计在 11 城共同校准，所以即使本机仅负责 Chicago，也要先准备联合校准输入。第二条命令完成联合校准，再只为 Chicago 构建 CLE、核对产物并签发城市回执。已有该工作目录时直接重跑相同命令。网络中断后保留已完成的下载与城市组件。
 
-默认首次获取 Geofabrik 当前 PBF。需要指定发布日时，把 `--osm-date YYYY-MM-DD` 加到 `sources`。所有机器采用相同参数。公共 AFDC API 默认使用 DEMO_KEY，生产机器可设置环境变量 `AFDC_API_KEY` 使用自己的免费密钥。来源、获取内容和数据条款见[数据说明](docs/SOURCES.zh-CN.md)。
+默认首次获取 Geofabrik 当前 PBF。需要指定发布日时，把 `--osm-date YYYY-MM-DD` 加到 `sources`。来源锁会记录该选项，其他机器传入锁后自动沿用。公共 AFDC API 默认使用 DEMO_KEY，生产机器可设置环境变量 `AFDC_API_KEY` 使用自己的免费密钥。来源、获取内容和数据条款见[数据说明](docs/SOURCES.zh-CN.md)。
 
 ## 多台服务器
 
