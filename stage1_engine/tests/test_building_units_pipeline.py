@@ -5,10 +5,24 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import Point, box
 
-from evrptw_cle.building_units import screen_and_label
+from evrptw_cle.building_units import screen_and_label, write_reference_roster
 from evrptw_cle.stage1 import main
 from evrptw_cle.stage1_v2 import SCHEMA
 import pytest
+
+
+def test_reference_roster_is_independent_of_preparation_time(tmp_path):
+    frame = pd.DataFrame({'entity_id': ['one'], 'source_group': ['building'],
+                          'fd_id': [42], 'units': [1]})
+    path = tmp_path / 'unit_reference_roster.parquet'
+    versions = []
+    for elapsed in (1, 2):
+        frame.attrs['feature_preparation'] = {'elapsed_seconds': elapsed}
+        write_reference_roster(tmp_path, frame, pd.Series(['train']))
+        versions.append(path.read_bytes())
+    assert versions[0] == versions[1]
+    write_reference_roster(tmp_path, frame, pd.Series(['test']))
+    assert path.read_bytes() != versions[0]
 
 
 def test_scale_gate_rejects_small_impossible_and_unassessed_multiunit():

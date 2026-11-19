@@ -50,6 +50,14 @@ def reference_split(frame, city, cfg):
     return reference, split
 
 
+def write_reference_roster(base, reference, split):
+    roster = reference[['entity_id', 'source_group', 'fd_id', 'units']].copy()
+    roster['reference_split'] = split
+    # Keep timing diagnostics on the feature frame, outside the portable cohort identity.
+    roster.attrs.clear()
+    roster.to_parquet(base / 'unit_reference_roster.parquet', index=False)
+
+
 def prepare_units_city(project, city):
     """Prepare features and geometric candidates directly from the declared sources."""
     cfg = settings(project)
@@ -86,9 +94,7 @@ def prepare_units_city(project, city):
     f.to_parquet(base / 'unit_features.parquet', index=False)
     edges.to_parquet(base / 'unit_candidate_edges.parquet', index=False)
     reference, split = reference_split(f, city, cfg)
-    roster = reference[['entity_id', 'source_group', 'fd_id', 'units']].copy()
-    roster['reference_split'] = split
-    roster.to_parquet(base / 'unit_reference_roster.parquet', index=False)
+    write_reference_roster(base, reference, split)
     write_json(base / 'unit_preparation.json', {
         'policy': POLICY, 'city': city, 'candidate_buildings': len(f),
         'reference_buildings': len(reference), 'train_reference_buildings': int(split.eq('train').sum()),
@@ -118,9 +124,7 @@ def calibrate_units(project, cities):
     for city in cities:
         f = load_features(project, city)
         ref, split = reference_split(f, city, cfg)
-        roster = ref[['entity_id', 'source_group', 'fd_id', 'units']].copy()
-        roster['reference_split'] = split
-        roster.to_parquet(input_dir(project, city) / 'unit_reference_roster.parquet', index=False)
+        write_reference_roster(input_dir(project, city), ref, split)
         fitted = model(cfg).fit(ref.loc[split.eq('train')])
         cal = ref.loc[split.eq('calibration')]
         if cal.empty:
