@@ -289,6 +289,19 @@ while len(list(dest.glob('*'))) < 2:
     marker.mkdir()
 
     def launch(command, log, env):
+        if "finalize" in command:
+            for name in (
+                "quality_thresholds.json",
+                "metric_scales.csv",
+                "calibration_predictions.parquet",
+            ):
+                write(roots / "units" / name, {"fixture": name})
+            for city in CITIES:
+                for name in ("unit_reference_roster", "final_buildings"):
+                    write(
+                        roots / f"cities/{city}/customer_inputs/{name}.parquet",
+                        {"fixture": city},
+                    )
         if "components" in command:
             city = command[command.index("--cities") + 1]
             subprocess.run([sys.executable, child, marker, city], check=True, env=env)
@@ -383,9 +396,12 @@ def test_release_index(tmp_path):
     folder = tmp_path / "plans"
     for city in CITIES:
         base = tmp_path / "shared" / city
-        write(base / "shared.json", {"city": city})
+        write(
+            base / "shared.json",
+            {"city": city, "vintage": "raw-test", "calibration": "cal-test"},
+        )
         loc.to_parquet(base / "locations.parquet")
-        save_plan(base, folder / (city + ".json"), 42, "2026-11-02", 28)
+        save_plan(base, folder / (city + ".json"), 20261103, "2026-11-02", 28)
     index = seal_plans(folder)
     assert index["task_count"] == 17400 and len(index["plans_sha256"]) == 11
     record = read(folder / "chicago.json")

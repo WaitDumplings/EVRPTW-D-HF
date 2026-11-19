@@ -11,6 +11,16 @@ import requests
 from stage2.common import lock, read, sha, write
 
 
+def lock_applies(reference, key):
+    if reference is None:
+        return False
+    return (
+        reference.get("schema") != "evrptwd_live_inputs_v1"
+        or key in reference["files"]
+        or key.startswith(("afdc/", "nsi/"))
+    )
+
+
 class Store:
     def __init__(self, work, expected=None):
         self.root = Path(work) / "raw"
@@ -20,7 +30,7 @@ class Store:
     def fetch(self, key, url, known=None, *, params=None, post=None):
         if Path(key).is_absolute() or ".." in Path(key).parts:
             raise ValueError(f"Invalid cache key {key}")
-        if self.expected is not None:
+        if lock_applies(self.expected, key):
             record = self.expected["files"].get(key)
             if (
                 not record
@@ -88,6 +98,19 @@ class Store:
                                             h.update(chunk)
                                             f.write(chunk)
                                     f.flush()
+                                    headers = getattr(response, "headers", {})
+                                    length = headers.get("Content-Length")
+                                    if (
+                                        length is not None
+                                        and headers.get(
+                                            "Content-Encoding", "identity"
+                                        ).lower()
+                                        == "identity"
+                                        and f.tell() != int(length)
+                                    ):
+                                        raise requests.exceptions.ChunkedEncodingError(
+                                            "Incomplete publisher response"
+                                        )
                                     checksum = h.hexdigest()
                                     if f.tell() == 0 or (known and checksum != known):
                                         raise ValueError(

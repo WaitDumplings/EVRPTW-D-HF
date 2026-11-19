@@ -106,7 +106,12 @@ def shared_identity(root):
     obj = read(Path(root) / "shared.json")
     return (
         digest(
-            {"city": obj["city"], "files": obj["files"], "vintage": obj.get("vintage")}
+            {
+                "city": obj["city"],
+                "files": obj["files"],
+                "vintage": obj.get("vintage"),
+                "calibration": obj.get("calibration"),
+            }
         )
         if "files" in obj
         else sha(Path(root) / "shared.json")

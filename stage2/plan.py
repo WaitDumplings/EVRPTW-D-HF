@@ -120,6 +120,7 @@ def save_plan(shared, path, seed, start, days, custom=None):
         code_sha256=code_id(),
         shared_sha256=shared_identity(shared),
         input_vintage=read(shared / "shared.json").get("vintage"),
+        calibration_sha256=read(shared / "shared.json").get("calibration"),
         resource_sha256={
             f.name: sha(f)
             for f in sorted((PROJECT / "config").iterdir())
@@ -139,6 +140,7 @@ def save_plan(shared, path, seed, start, days, custom=None):
 
 def seal_plans(folder):
     """Bind the official eleven-city targets. Custom research panels are separate."""
+    registered = read(PROJECT / "config/release_panel.json")
     common = None
     hashes = {}
     total = 0
@@ -158,8 +160,15 @@ def seal_plans(folder):
                 "code_sha256",
                 "resource_sha256",
                 "input_vintage",
+                "calibration_sha256",
             )
         }
+        if any(fields[k] != value for k, value in registered.items()) or not all(
+            fields[k] for k in ("input_vintage", "calibration_sha256")
+        ):
+            raise ValueError(
+                "Incompatible release plan or missing public calibration: " + city
+            )
         if common is not None and common != fields:
             raise ValueError("Incompatible release plan: " + city)
         common = fields

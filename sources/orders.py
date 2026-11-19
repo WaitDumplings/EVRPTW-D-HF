@@ -68,8 +68,21 @@ def order_tables(catalog):
         ],
     )
     parcels = parcels[parcels.donor_id.isin(donors.donor_id)]
+    if (
+        parcels.source_planned_service_s.isna().any()
+        or parcels.loc[
+            parcels.source_tw_status.eq("specified"),
+            ["source_tw_start_offset_s", "source_tw_end_offset_s"],
+        ]
+        .isna()
+        .any()
+        .any()
+    ):
+        raise ValueError("Missing Amazon parcel service or specified window offset")
     donors = donors.join(
-        parcels.groupby("donor_id").source_planned_service_s.sum().rename("service_s"),
+        parcels.groupby("donor_id")
+        .source_planned_service_s.sum(min_count=1)
+        .rename("service_s"),
         on="donor_id",
         validate="one_to_one",
     )

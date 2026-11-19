@@ -279,7 +279,7 @@ def test_partial_fetch_preserves_its_input_lock(tmp_path):
         },
     }
     write(ref, content)
-    prepare(tmp_path, "cities", [], 1, "latest", ref)
+    prepare(tmp_path, "cities", [], 1, None, ref)
     assert read(ref) == content
 
 
@@ -303,9 +303,66 @@ def test_source_lock_supplies_snapshot_date(tmp_path):
                 source_code=source_code_hash(), spec=sha(SPEC), osm_date="2026-11-01"
             ),
             sources={},
+            outputs={},
         ),
     )
     prepare(tmp_path, "cities", [], 1, None, ref)
     assert read(tmp_path / "public/sources.lock.json")["osm_date"] == "2026-11-01"
     with pytest.raises(ValueError, match="conflicts"):
         prepare(tmp_path, "cities", [], 1, "2026-11-02", ref)
+
+
+def test_live_capture_can_be_replayed_on_independent_hosts(tmp_path, monkeypatch):
+    import sources.geography as geo
+    import sources.prepare as prep
+    from stage2.common import read, write
+
+    def areas(store, spec):
+        store.records["census/places.zip"] = {
+            "url": "https://census.test/places",
+            "sha256": "c" * 64,
+            "bytes": 10,
+        }
+        return None, ["17031"]
+
+    def structures(store, county):
+        store.records[f"nsi/{county}.geojsonseq"] = {
+            "url": "https://nsi.test/structures",
+            "sha256": "d" * 64,
+            "bytes": 12,
+        }
+
+    def stations(work, name, osm_date, expected):
+        assert name == "afdc"
+        write(
+            work / "public/afdc/receipt.json",
+            {
+                "sources": {
+                    "afdc/station.csv": {
+                        "url": "https://afdc.test/stations",
+                        "sha256": "a" * 64,
+                        "bytes": 13,
+                    }
+                }
+            },
+        )
+
+    monkeypatch.setattr(geo, "place_counties", areas)
+    monkeypatch.setattr(geo, "nsi_file", structures)
+    monkeypatch.setattr(prep, "part", stations)
+    a, b = tmp_path / "A", tmp_path / "B"
+    from pipeline import cli
+
+    cli(["--work", str(a), "sources", "--only", "live", "--workers", "2"])
+    lock = a / "public/live.lock.json"
+    prep.prepare(b, "live", [], 2, None, lock)
+    assert sha(lock) == sha(b / "public/live.lock.json")
+    reference = read(lock)
+    from sources.download import lock_applies
+
+    assert lock_applies(reference, "nsi/another-county")
+    assert not lock_applies(reference, "osm/texas-261101.osm.pbf")
+    reference["files"]["afdc/station.csv"]["sha256"] = "e" * 64
+    write(lock, reference)
+    with pytest.raises(ValueError, match="Live sources differ"):
+        prep.prepare(b, "live", [], 2, None, lock)

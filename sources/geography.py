@@ -15,19 +15,33 @@ from . import census
 TIGER = "https://www2.census.gov/geo/tiger/TIGER2025"
 
 
-def geography(store, city, spec, directory):
-    def tiger(kind, code):
-        name = f"tl_2025_{code}_{kind.lower()}.zip"
-        return store.fetch("census/" + name, f"{TIGER}/{kind}/{name}")
+def tiger(store, kind, code):
+    name = f"tl_2025_{code}_{kind.lower()}.zip"
+    return store.fetch("census/" + name, f"{TIGER}/{kind}/{name}")
 
+
+def place_counties(store, spec):
     state = spec["place"][:2]
-    place = census._select_place(tiger("PLACE", state), spec["place"])
-    counties = census._county_geoids(place, gpd.read_file(tiger("COUNTY", "us")), state)
+    place = census._select_place(tiger(store, "PLACE", state), spec["place"])
+    counties = census._county_geoids(
+        place, gpd.read_file(tiger(store, "COUNTY", "us")), state
+    )
+    return place, counties
+
+
+def nsi_file(store, county):
+    url = f"https://nsi.sec.usace.army.mil/nsiapi/structures?fips={county}&fmt=fs"
+    return store.fetch(f"nsi/{county}.geojsonseq", url)
+
+
+def geography(store, city, spec, directory):
+    state = spec["place"][:2]
+    place, counties = place_counties(store, spec)
     crs = spec["crs"]
     admin = census._polygonal_only(place.to_crs(crs).geometry.iloc[0])
     water = []
     for county in counties:
-        areas = gpd.read_file(tiger("AREAWATER", county), mask=place).to_crs(crs)
+        areas = gpd.read_file(tiger(store, "AREAWATER", county), mask=place).to_crs(crs)
         water.extend(areas.geometry.intersection(admin))
     land = census._polygonal_only(admin.difference(shapely.union_all(water)))
     if land.is_empty or not land.is_valid:
@@ -35,7 +49,7 @@ def geography(store, city, spec, directory):
     place.to_file(directory / "admin.geojson", driver="GeoJSON")
     service = gpd.GeoDataFrame(geometry=[land], crs=crs).to_crs(4326)
     service.to_file(directory / "land.geojson", driver="GeoJSON")
-    bgpath = tiger("BG", state)
+    bgpath = tiger(store, "BG", state)
     bg = gpd.read_file(bgpath, columns=["GEOID"])
     bg["tract"] = bg.GEOID.str[:11]
     mask = service.to_crs(bg.crs).geometry.iloc[0]
@@ -112,8 +126,7 @@ def nsi(store, counties, boundary, output):
     records = []
     seen = {}
     for county in counties:
-        url = f"https://nsi.sec.usace.army.mil/nsiapi/structures?fips={county}&fmt=fs"
-        path = store.fetch(f"nsi/{county}.geojsonseq", url)
+        path = nsi_file(store, county)
         tail = b""
 
         def features():

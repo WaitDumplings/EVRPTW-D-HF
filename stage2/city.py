@@ -177,6 +177,7 @@ def prepare(cle_root, city, target, geography):
                     schema="evrptwd_shared_v1",
                     city=city,
                     source=source,
+                    calibration=read(authority).get("calibration_sha256"),
                     vintage=read(authority).get(
                         "inputs_sha256", read(authority).get("freeze_manifest_sha256")
                     ),

@@ -2,9 +2,11 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from pathlib import Path
 import os
 import subprocess
 import sys
+import tempfile
 
 from .common import CITIES, CONFIG, FROZEN, digest, lock, read, sha, write
 
@@ -12,8 +14,12 @@ from .common import CITIES, CONFIG, FROZEN, digest, lock, read, sha, write
 def local_config(inputs, output):
     obj = read(CONFIG)
     if not (inputs / "inventory.json").is_file():
-        missing = [n for n in [*CITIES, "afdc"] if not (inputs / n / "receipt.json").is_file()]
-        raise ValueError(f"Run sources --only stage1 before shared calibration. Missing components: {missing}")
+        missing = [
+            n for n in [*CITIES, "afdc"] if not (inputs / n / "receipt.json").is_file()
+        ]
+        raise ValueError(
+            f"Run sources --only stage1 before shared calibration. Missing components: {missing}"
+        )
     inv = read(inputs / "inventory.json")
     if inv["schema"] != "evrptwd_public_stage1_v1" or set(inv["cities"]) != set(CITIES):
         raise ValueError("Run sources --only stage1 for the full calibration cohort")
@@ -54,12 +60,29 @@ def launch(command, log, env):
         )
 
 
+def calibration_files(output):
+    paths = [
+        "units/quality_thresholds.json",
+        "units/metric_scales.csv",
+        "units/calibration_predictions.parquet",
+    ]
+    for city in CITIES:
+        paths.extend(
+            f"cities/{city}/customer_inputs/{name}.parquet"
+            for name in ("unit_reference_roster", "final_buildings")
+        )
+    return {name: sha(output / name) for name in paths}
+
+
 def run(inputs, output, cities, phase, workers):
     env = dict(
         os.environ,
         PYTHONPATH=str(FROZEN / "src"),
         OPENBLAS_NUM_THREADS="1",
         OMP_NUM_THREADS="1",
+        MKL_NUM_THREADS="1",
+        VECLIB_MAXIMUM_THREADS="1",
+        PYTHONHASHSEED="0",
     )
     output = output.resolve()
     logs = output / "logs"
@@ -85,6 +108,18 @@ def run(inputs, output, cities, phase, workers):
     if phase in ("all", "shared"):
         with lock(output / ".stage1.lock"):
             if not shared_marker.exists():
+                pending = output / ".building-calibration"
+                if pending.exists():
+                    archive_root = output / "interrupted"
+                    archive_root.mkdir(exist_ok=True)
+                    archive = Path(
+                        tempfile.mkdtemp(prefix="calibration-", dir=archive_root)
+                    )
+                    for name in ("units", "cities"):
+                        part = output / name
+                        if part.exists():
+                            part.rename(archive / name)
+                pending.touch()
                 for step in (
                     "prepare",
                     "calibrate-units",
@@ -92,9 +127,16 @@ def run(inputs, output, cities, phase, workers):
                     "finalize",
                 ):
                     launch([*commands, step, cfg], logs / (step + ".log"), env)
-                write(shared_marker, {"signature": signature})
+                write(
+                    shared_marker,
+                    {"signature": signature, "files": calibration_files(output)},
+                )
+                pending.unlink(missing_ok=True)
     if not shared_marker.is_file() or read(shared_marker)["signature"] != signature:
         raise ValueError("Run stage1 --phase shared once on the eleven-city cohort")
+    if calibration_files(output) != read(shared_marker)["files"]:
+        raise ValueError("Joint housing calibration files have changed")
+    calibration_sha = digest(read(shared_marker)["files"])
     if phase in ("all", "cities"):
 
         def one(city):
@@ -156,6 +198,7 @@ def run(inputs, output, cities, phase, workers):
                     calibration_cohort=list(CITIES),
                     inputs_sha256=public_sha,
                     engine_sha256=engine_hash,
+                    calibration_sha256=calibration_sha,
                     cle_manifest_sha256=sha(base / "cle_manifest.json"),
                     validation_sha256=sha(base / "stage1_validation.json"),
                 ),
@@ -181,6 +224,7 @@ def run(inputs, output, cities, phase, workers):
                     and old.get("config_sha256") == sha(cfg)
                     and old.get("inputs_sha256") == public_sha
                     and old.get("engine_sha256") == engine_hash
+                    and old.get("calibration_sha256") == calibration_sha
                     and (output / "validation_summary.json").exists()
                     and read(output / "validation_summary.json") == reports
                 ):
@@ -193,6 +237,7 @@ def run(inputs, output, cities, phase, workers):
                     freeze_id="stage1-public-v1",
                     inputs_sha256=public_sha,
                     engine_sha256=engine_hash,
+                    calibration_sha256=calibration_sha,
                     complete_cle_validation_passed=True,
                     stage2_included=False,
                     completed_utc=datetime.now(timezone.utc).isoformat(),

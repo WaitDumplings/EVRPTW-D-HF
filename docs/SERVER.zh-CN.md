@@ -11,7 +11,7 @@
 
 ## 可复制的 prompt
 
-> 克隆指定仓库并检出指定提交。按 README 安装 Python 3.11 依赖和 osmium-tool。使用我指定的工作目录、城市和分片。直接从 SOURCES 中的发布机构下载原料，在本机裁剪和构造中间文件。第一台机器记录 OSM 发布日和来源锁，其他机器用同一发布日期和来源锁独立下载。先完成 11 城联合住宅户数校准，再为本机分配的城市构建并验证 Stage 1 CLE，执行 prepare-city 和 plan。记录 Git 提交、来源锁、城市计划的 SHA-256 和 Stage 1 日志。
+> 克隆指定仓库并检出指定提交。按 README 安装 Python 3.11 依赖和 osmium-tool。使用我指定的工作目录、城市和分片。直接从 SOURCES 中的发布机构下载原料，在本机裁剪和构造中间文件。启动各机时先同时运行 sources --only live，核对 live.lock.json 的 SHA-256，再把匹配的锁传给 sources --source-lock。默认道路快照为 2026-11-01。各机保留自己的 raw/ 缓存，此后可分时执行。先完成 11 城联合住宅户数校准，再为本机分配的城市构建并验证 Stage 1 CLE，执行 prepare-city 和 plan。记录 Git 提交、来源锁、城市计划的 SHA-256 和 Stage 1 日志。
 >
 > 用已登记的首个 Cus100 槽位试通正常生成、四矩阵恢复和绘图。开发城市选 train，Jacksonville 选 test3。汇报构造状态与恢复结果。正式批量任务获准后用 stage2 的 workers 和 shard 参数执行。中断后按相同命令和 seed 续跑，保留失败槽位与原因。全批用 audit 汇总各分片的已完成、缺失和重复槽位。
 

@@ -28,13 +28,13 @@ python pipeline.py --work "$WORK" stage2 --city "$CITY" --split train --n 100 --
 
 第一条 `sources` 默认下载和处理全部 11 城的 Stage 1 来源及公共 Amazon 订单库。多个城市用子进程并行。住宅户数的邻居估计在 11 城共同校准，所以即使本机仅负责 Chicago，也要先准备联合校准输入。第二条命令完成联合校准，再只为 Chicago 构建 CLE、核对产物并签发城市回执。已有该工作目录时直接重跑相同命令。网络中断后保留已完成的下载与城市组件。
 
-默认首次获取 Geofabrik 当前 PBF。需要指定发布日时，把 `--osm-date YYYY-MM-DD` 加到 `sources`。来源锁会记录该选项，其他机器传入锁后自动沿用。公共 AFDC API 默认使用 DEMO_KEY，生产机器可设置环境变量 `AFDC_API_KEY` 使用自己的免费密钥。来源、获取内容和数据条款见[数据说明](docs/SOURCES.zh-CN.md)。
+默认采用 Geofabrik 的 2026-11-01 有日期的 PBF。需要指定发布日时，把 `--osm-date YYYY-MM-DD` 加到 `sources`。来源锁会记录该选项，其他机器传入锁后自动沿用。公共 AFDC API 默认使用 DEMO_KEY，生产机器可设置环境变量 `AFDC_API_KEY` 使用自己的免费密钥。来源、获取内容和数据条款见[数据说明](docs/SOURCES.zh-CN.md)。
 
 ## 多台服务器
 
 可以把[服务器 agent 执行说明](docs/SERVER.zh-CN.md)随仓库地址、提交号和城市分工交给每台机器。
 
-- **不同城市。** 每台从同一 Git 提交运行上述流程，各自设置 `CITY`。第一台得到 `$WORK/public/sources.lock.json` 后，把这份小清单交给其他机器，各机执行 `sources --source-lock /path/to/sources.lock.json --workers 2`。各机自行下载、验 SHA-256 并处理原料。也可以挂载同一组织内部的 `$WORK/raw/` 缓存以减少对上游的重复请求。不同日期的 NSI、AFDC、Census 地址响应或 OSM 文件可能变化。哈希不同则报告具体来源，两次结果归入不同批次。
+- **不同城市。** 在每台机器先运行 `python pipeline.py --work "$WORK" sources --only live --workers 2`。同时从 AFDC、USACE 和 Census 抓取会变化的原始响应。比较各机 `public/live.lock.json` 的 SHA-256。相同后各机使用 `sources --source-lock /path/to/live.lock.json --workers 2` 下载其余公开原料，再设置各自的 `CITY` 生成。完整的 `public/sources.lock.json` 还记录按城市处理后的文件摘要；在同一批可以用这份完整锁复核。每台机器保留自己的 `raw/`。隔天新机器若收到不同的实时数据，须与其他机器另开共同采集批次，或使用本机构保存的同一批官方原始响应。
 - **同城多机。** 同城机器使用相同输入锁、软件版本、CPU 架构和 BLAS。各自构建、登记后，对照 `plans/<city>.json` 的 SHA-256。相同清单按下面两条命令各执行一条。节点顺序、路网文件、随机流和计划均绑定；工作路径和本机回执时间可以不同。
 - **同机多进程。** `stage1 --city chicago dallas --workers 2` 并行组装两城。Stage 2 的 `--workers 2` 并行两个实例。根据可用内存设置进程数，每个 Stage 2 worker 持有本城路网。
 - **正式面板。** 去掉 `--split/--n/--limit` 即执行本机负责的全部槽位。11 城计划汇总后运行 `seal-plans`。收回分片后用 `audit` 检查已完成、未证、失败、遗漏和重复槽位。重跑原命令复用已校验的结果并以原 seed 重试执行异常。首发目标为 17,400 个槽位，四档 CS 预算为 10／30／40／50。[建模和配额](docs/METHOD.zh-CN.md)
@@ -43,6 +43,14 @@ python pipeline.py --work "$WORK" stage2 --city "$CITY" --split train --n 100 --
 python pipeline.py --work "$WORK" stage2 --city "$CITY" --workers 2 --shard 0/2
 python pipeline.py --work "$WORK" stage2 --city "$CITY" --workers 2 --shard 1/2
 python pipeline.py --work "$WORK" audit --city "$CITY" --outputs /data/shard0 /data/shard1
+```
+
+首次在多机建同一批时，先在各机执行下面两行。确认各机打印的哈希相同后，将第一台机器的 `live.lock.json` 存作 `REF`，再执行第三行。完整 `sources.lock.json` 的摘要用于核对原料和空间处理结果。封板时另核对 11 城共用的住宅校准文件摘要。
+
+```bash
+python pipeline.py --work "$WORK" sources --only live --workers 2
+sha256sum "$WORK/public/live.lock.json"
+python pipeline.py --work "$WORK" sources --source-lock "$REF" --workers 2
 ```
 
 ## 绘图和恢复

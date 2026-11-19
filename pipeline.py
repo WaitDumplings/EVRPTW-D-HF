@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 
-from stage2.common import CITIES, FROZEN
+from stage2.common import CITIES, FROZEN, PROJECT, read
 
 for thread_limit in (
     "OPENBLAS_NUM_THREADS",
@@ -39,13 +39,15 @@ def cli(argv=None):
         "sources", help="Download publisher sources and construct normalized inputs"
     )
     fetch.add_argument(
-        "--only", choices=["all", "stage1", "stage2", "cities", "afdc"], default="all"
+        "--only",
+        choices=["all", "live", "stage1", "stage2", "cities", "afdc"],
+        default="all",
     )
     fetch.add_argument("--city", nargs="+", choices=CITIES, default=list(CITIES))
     fetch.add_argument("--workers", type=positive, default=1)
     fetch.add_argument(
         "--osm-date",
-        help="Geofabrik snapshot YYYY-MM-DD or latest (default: date in source lock, otherwise latest)",
+        help="Geofabrik snapshot YYYY-MM-DD (default: source lock, otherwise 2026-11-01)",
     )
     fetch.add_argument(
         "--source-lock",
@@ -75,9 +77,10 @@ def cli(argv=None):
         "plan", help="Write city task slots with fixed seeds, dates and depot IDs"
     )
     a.add_argument("--city", required=True, choices=CITIES)
-    a.add_argument("--seed", type=int, default=20261103)
-    a.add_argument("--start-date", default="2026-11-02")
-    a.add_argument("--calendar-days", type=positive, default=28)
+    release = read(PROJECT / "config/release_panel.json")
+    a.add_argument("--seed", type=int, default=release["root_seed"])
+    a.add_argument("--start-date", default=release["calendar_start"])
+    a.add_argument("--calendar-days", type=positive, default=release["calendar_days"])
     a.add_argument(
         "--custom-n", type=int, help="Independent experimental panel (100 through 2000)"
     )

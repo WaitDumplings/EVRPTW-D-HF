@@ -159,7 +159,7 @@ def depots(pbf, boundary_path, output):
 
 def layers(store, city, spec, directory, boundary, date):
     region = spec["region"]
-    tag = date.replace("-", "")[2:] if date != "latest" else "latest"
+    tag = date.replace("-", "")[2:]
     url = f"https://download.geofabrik.de/north-america/us/{region}-{tag}.osm.pbf"
     key = f"osm/{region}-{tag}.osm.pbf"
     pbf = store.fetch(key, url)
