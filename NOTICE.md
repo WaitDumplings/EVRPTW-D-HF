@@ -1,0 +1,3 @@
+# Sources and attribution
+
+Roads and mapped facilities use © OpenStreetMap contributors via Geofabrik. Building footprints come from Microsoft GlobalMLBuildingFootprints, structure attributes from USACE NSI, geographic boundaries and address matching from the U.S. Census Bureau, public station and port data from AFDC/NLR, and speed calibration from EPA onroad statistical inputs. The order model uses the Amazon Last Mile Routing Research Challenge data under CC BY-NC 4.0. Source links and processing details appear in [the data guide](docs/SOURCES.zh-CN.md). The project owner has not assigned a new code license in this checkout.

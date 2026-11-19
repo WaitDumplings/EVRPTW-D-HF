@@ -1,0 +1,19 @@
+{
+  "status": "local_candidate",
+  "footprint_options": {
+    "profile_version": "frontier-local-v1",
+    "half_life_s": 15
+  },
+  "release_r2_half_life_s": 0,
+  "reestimation": {
+    "pair_manifest_sha256": "f19c7f5d591a21e00e05cea57d51e10c6f7a6360879f5aa059bdd31ca1804a5f",
+    "task_manifest_sha256": "a403925ab67b0f618b5ee055a9ec69cdcc5a07630dc8f3c7411fd599c75b2117",
+    "grid_s": [0, 7.5, 15, 22.5, 30, 60, 120, 240, 480],
+    "replicates": 32,
+    "root_seed": 20261103,
+    "task_key_fields": ["amazon_task_id", "zero_based_replicate"],
+    "observation": "Jaccard of different-date observed tract sets",
+    "objective": "mean over stations of absolute station-mean generated minus station-mean observed pair Jaccard",
+    "tie_break": "lowest half_life_s"
+  }
+}

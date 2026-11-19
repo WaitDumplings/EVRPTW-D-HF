@@ -1,0 +1,3 @@
+[tool.pytest.ini_options]
+testpaths = ["tests", "stage1_engine/tests"]
+pythonpath = [".", "stage1_engine/src"]

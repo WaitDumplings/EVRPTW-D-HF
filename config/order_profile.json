@@ -1,0 +1,52 @@
+{
+  "schema": "stage2_order_profile_v2",
+  "method_version": "2026-11-18-r2",
+  "donor_pool": "FULL-TRAINING",
+  "sources": {
+    "input_manifest": {
+      "workspace_path": "handoff/stage2-method-v1-20261105/derived_training/manifest.json",
+      "sha256": "d87f43ebe4f81e306f490f88dbec9b4206f520000e89c4757b4209aaabc6c460",
+      "role": "source provenance and numerical tables"
+    },
+    "source_stop_summary.parquet": {
+      "sha256": "0c2b3e8f7deee427fd7d355e480d0835624659ef5c9c91bc106aed153ff66240"
+    },
+    "service_residuals.parquet": {
+      "workspace_path": "handoff/stage2-method-v1-20261105/derived_training/service_residuals.parquet",
+      "sha256": "a814462258ec0aa574faef59feb65df40b902e4e3f1969781c36b2f97574018a",
+      "rows": 893402
+    },
+    "location_tw_patterns.parquet": {
+      "workspace_path": "handoff/stage2-method-v1-20261105/derived_training/location_tw_patterns.parquet",
+      "sha256": "9e8c594b862794135d976bd311beab7e2ea84e35404872d98ee78154664a1ec8",
+      "rows": 57673
+    }
+  },
+  "orders": {
+    "mean_parcels_per_active_household": 1.4,
+    "minimum_donor_bundles": 100,
+    "minimum_donor_station_days": 10,
+    "count_pool_order": ["absolute_log_count_ratio_ascending", "source_count_ascending"],
+    "donor_weights": "uniform_over_pooled_bundles",
+    "cargo_capacity_cm3": 18500000,
+    "maximum_full_proposals": 64
+  },
+  "service": {
+    "service_a_s": 22.352826382480657,
+    "service_b_s": 35.55693188115095,
+    "service_alpha": 1.136997577364419,
+    "service_support_max_count": 16,
+    "service_tail_gamma": 0.5,
+    "service_scale": 1.0
+  },
+  "location_window": {
+    "source_key": "order_donor_id",
+    "index_key": "donor_id",
+    "specified_if": "order_donor_id_in_location_tw_patterns",
+    "specified_bounds": ["a", "b"],
+    "bounds_clock": "source_local_seconds_from_midnight_transferred_to_target_service_day",
+    "when_absent": "no_location_window",
+    "when_package_count_changes": "inherit_original_donor_location_window",
+    "when_capacity_exceeded": "redraw_full_order_including_window"
+  }
+}

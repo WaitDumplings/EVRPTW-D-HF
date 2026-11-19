@@ -1,0 +1,67 @@
+{
+  "schema": "evrptw_building_first_stage1_v1",
+  "axis_r": 0.2853432473555575,
+  "units": {
+    "seed": 20261102,
+    "block_m": 2000,
+    "train_pct": 80,
+    "cal_pct": 10,
+    "test_pct": 10,
+    "k": 8,
+    "scale_probe_count": 2000,
+    "calibration_per_city": 5000,
+    "quality_target_retention": 0.95,
+    "quality_min_group_size": 30,
+    "quality_min_neighbors": 8,
+    "quality_dispersion_column": "neighbor_log_spread_90",
+    "min_reference_count": 1,
+    "min_unit_area_m2": 10.0,
+    "floor_to_floor_m": 3.048
+  },
+  "construction": {
+    "roads": {
+      "selection_buffer_km": 20,
+      "allow_private_through": true,
+      "facility_masks": false
+    }
+  },
+  "customer": {
+    "active_profile": "unrestricted",
+    "include_model_imputed": true
+  },
+  "cities": {
+    "new-york": {
+      "area_crs": "EPSG:32618"
+    },
+    "los-angeles": {
+      "area_crs": "EPSG:32611"
+    },
+    "chicago": {
+      "area_crs": "EPSG:32616"
+    },
+    "houston": {
+      "area_crs": "EPSG:32615"
+    },
+    "phoenix": {
+      "area_crs": "EPSG:32612"
+    },
+    "philadelphia": {
+      "area_crs": "EPSG:32618"
+    },
+    "san-antonio": {
+      "area_crs": "EPSG:32614"
+    },
+    "san-diego": {
+      "area_crs": "EPSG:32611"
+    },
+    "dallas": {
+      "area_crs": "EPSG:32614"
+    },
+    "fort-worth": {
+      "area_crs": "EPSG:32614"
+    },
+    "jacksonville": {
+      "area_crs": "EPSG:32617"
+    }
+  }
+}

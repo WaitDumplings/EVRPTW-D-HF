@@ -1,0 +1,30 @@
+{
+  "schema": "evrptw_public_location_contract_v1",
+  "policy": {
+    "version": "public_location_exclusions_v4_geometry_scope",
+    "excluded_categories": [
+      "military",
+      "intelligence",
+      "law_enforcement",
+      "correctional",
+      "nuclear",
+      "motor_access_prohibited"
+    ],
+    "civil_airports_and_ports_allowed": true,
+    "private_commercial_sites_allowed": true,
+    "sensitive_point_buffer_m": 50.0,
+    "motor_prohibited_barrier_nodes_are_area_masks": false,
+    "mask_scope": "delivery_only or all_motor; legacy absent scope means all_motor",
+    "territorial_boundary_text_is_facility_evidence": false,
+    "spatial_match": "source geometry intersects excluded facility area or buffered sensitive POI",
+    "export_removed_locations": false
+  },
+  "source_family": "same frozen OpenStreetMap PBF as depot candidates",
+  "export_scope": [
+    "customers",
+    "depots",
+    "charging_stations"
+  ],
+  "mask_storage": "private build input; never package as public POI layer",
+  "coverage_limit": "Excludes identifiable tags, names and OSM host areas. OSM incompleteness prevents a claim of exhaustive real-world detection."
+}

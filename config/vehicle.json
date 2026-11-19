@@ -1,0 +1,32 @@
+{
+  "schema": "evrptw_vehicle_profile_v1",
+  "ac_cap_kw": 11,
+  "battery_capacity_kwh": 100,
+  "cargo_capacity_cm3": 18500000,
+  "dc_cap_kw": 100,
+  "fleet_size": null,
+  "initial_soc": 1,
+  "profile_id": "delivery700_reference_synthetic_energy_v1",
+  "reserve_soc": 0.1,
+  "specific_energy_kwh_per_km": 0.38910505836575876,
+  "operating_window_s": [
+    28800,
+    86400
+  ],
+  "time_axis": "seconds_from_local_service_day_midnight",
+  "charging": {
+    "charge_policy": "full",
+    "charge_curve": "linear",
+    "opening_hours_policy": "assume_available_during_shift",
+    "queue_policy": "unlimited_ports"
+  },
+  "route_rules": {
+    "start_at_depot": true,
+    "return_to_same_depot": true,
+    "single_trip_per_vehicle": true,
+    "serve_each_customer_once": true,
+    "split_delivery_allowed": false,
+    "allow_charging_station_revisits": true,
+    "time_window_semantics": "service_start"
+  }
+}

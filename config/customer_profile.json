@@ -1,0 +1,25 @@
+{
+  "method_version": "2026-11-18-r3",
+  "stage1": "stage1-public-v1",
+  "nomination": "boundary_parent",
+  "archive_time_limit_s": 4566.3,
+  "one_way_budget_kwh": 90.0,
+  "kwh_per_km": 0.38910505836575876,
+  "household_probability": {
+    "los-angeles": 0.05,
+    "chicago": 0.03,
+    "shared": 0.03
+  },
+  "seed_count": {
+    "intercept": -3.213676259806156,
+    "log_n_over_100": 3.100844600500852
+  },
+  "ratio_reference": {
+    "path": "config/candidate_ratio.csv",
+    "sha256": "aa49a6d2124a938818b7cecd0d7bb7b65abc9d4f8635092d78c13172ee3a0a19"
+  },
+  "order_profile": {
+    "path": "config/order_profile.json",
+    "sha256": "5a33ff74d23865099743ff1ca6338f77d0ef818e13fb87a51fc4e5215b414441"
+  }
+}

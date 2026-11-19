@@ -1,0 +1,269 @@
+{
+  "cities": {
+    "new-york": {
+      "place": "3651000",
+      "query": "New York City, New York, USA",
+      "crs": "EPSG:32618",
+      "region": "new-york",
+      "quadkeys": [
+        "032010110",
+        "032010111"
+      ]
+    },
+    "los-angeles": {
+      "place": "0644000",
+      "query": "Los Angeles, California, USA",
+      "crs": "EPSG:32611",
+      "region": "california/socal",
+      "quadkeys": [
+        "023012133",
+        "023012311",
+        "023012313"
+      ]
+    },
+    "chicago": {
+      "place": "1714000",
+      "query": "Chicago, Illinois, USA",
+      "crs": "EPSG:32616",
+      "region": "illinois",
+      "quadkeys": [
+        "030222230",
+        "030222231"
+      ]
+    },
+    "houston": {
+      "place": "4835000",
+      "query": "Houston, Texas, USA",
+      "crs": "EPSG:32615",
+      "region": "texas",
+      "quadkeys": [
+        "023130133",
+        "023131020",
+        "023131022",
+        "023131200"
+      ]
+    },
+    "phoenix": {
+      "place": "0455000",
+      "query": "Phoenix, Arizona, USA",
+      "crs": "EPSG:32612",
+      "region": "arizona",
+      "quadkeys": [
+        "023102200",
+        "023102202"
+      ]
+    },
+    "philadelphia": {
+      "place": "4260000",
+      "query": "Philadelphia, Pennsylvania, USA",
+      "crs": "EPSG:32618",
+      "region": "pennsylvania",
+      "quadkeys": [
+        "032010102",
+        "032010103",
+        "032010120",
+        "032010121"
+      ]
+    },
+    "san-antonio": {
+      "place": "4865000",
+      "query": "San Antonio, Texas, USA",
+      "crs": "EPSG:32614",
+      "region": "texas",
+      "quadkeys": [
+        "023130033",
+        "023130122",
+        "023130211",
+        "023130300"
+      ]
+    },
+    "san-diego": {
+      "place": "0666000",
+      "query": "San Diego, California, USA",
+      "crs": "EPSG:32611",
+      "region": "california/socal",
+      "quadkeys": [
+        "023013221",
+        "023013223"
+      ]
+    },
+    "dallas": {
+      "place": "4819000",
+      "query": "Dallas, Texas, USA",
+      "crs": "EPSG:32614",
+      "region": "texas",
+      "quadkeys": [
+        "023112330"
+      ]
+    },
+    "fort-worth": {
+      "place": "4827000",
+      "query": "Fort Worth, Texas, USA",
+      "crs": "EPSG:32614",
+      "region": "texas",
+      "quadkeys": [
+        "023112321"
+      ]
+    },
+    "jacksonville": {
+      "place": "1235000",
+      "query": "Jacksonville, Florida, USA",
+      "crs": "EPSG:32617",
+      "region": "florida",
+      "quadkeys": [
+        "032021031",
+        "032021033",
+        "032021120",
+        "032021122"
+      ]
+    }
+  },
+  "microsoft": {
+    "032010111": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=032010111/part-00185-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 98492633,
+      "sha256": "24b6b96d7d11069d833d4acd16ec48f461952706c846c310011e8d4af44ff926"
+    },
+    "023112321": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023112321/part-00046-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 90699078,
+      "sha256": "350a59f7fac6ea0e5a8f611993735edbc68974e7b593f2d34233899737570115"
+    },
+    "023012133": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023012133/part-00053-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 19626717,
+      "sha256": "6cc19e3ebf99751de8ddaa19c7ccf05734d46a3acba42d13b9a6727ff0cd4ba4"
+    },
+    "023012313": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023012313/part-00085-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 519099,
+      "sha256": "caf2ab4e707252363a6775ca22e2d8ccba18f9d1a4eb57a2e5621a6824fc0723"
+    },
+    "023112330": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023112330/part-00058-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 114672725,
+      "sha256": "36ce5a376717f646b509e02dd13a346ba05b24cba367a23f5c3fed996fa89a15"
+    },
+    "032010110": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=032010110/part-00032-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 132766235,
+      "sha256": "5cd7a33f576e2ba747899425c0bbf300f7d2e6a57482c284a523d697303fde95"
+    },
+    "023130133": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023130133/part-00137-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 53602102,
+      "sha256": "20dd6e1361697182bf039e00bed60716d2b56a571e944db31ec75073d8161403"
+    },
+    "023131020": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023131020/part-00119-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 27759891,
+      "sha256": "eb40d0bcffbe6ee150c0b9836cc53fa28d63df34af6c3f33b4996aed6e872e07"
+    },
+    "030222230": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=030222230/part-00150-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 81232727,
+      "sha256": "43739c30115615d03ad78b50149e4e47b0537420c8d07778f8c09c177323ee68"
+    },
+    "023131200": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023131200/part-00007-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 27041954,
+      "sha256": "fd5d14fc82f0861af1e8638629c1999f9d32208aea406b3c0042f0ca8330af34"
+    },
+    "023102200": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023102200/part-00162-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 11602327,
+      "sha256": "ad1c0a5861acab3d904b4b46b6109b47a8eb13b326253e77fb971844de505c32"
+    },
+    "030222231": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=030222231/part-00081-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 128158761,
+      "sha256": "651a1dccfd0727ec890e46e3757f5d6ced2aabde611bf0f7a8b4f215fd77d47f"
+    },
+    "023012311": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023012311/part-00015-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 179924101,
+      "sha256": "b7c87455aeb7a127e81dd897c7d0311453b9f8a67a80d5ad64a2d04f85c23d77"
+    },
+    "032010102": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=032010102/part-00147-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 49538352,
+      "sha256": "20d0fecd4bb5c1f0fe0b80941cab4ac452ffd2bf4ef1314aff379cc7f56e12f6"
+    },
+    "023131022": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023131022/part-00188-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 145671443,
+      "sha256": "72e91768802167f8e88dddf90b06c3fd4b15bf6f88b74e66677e56589e61578f"
+    },
+    "032010120": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=032010120/part-00025-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 35646251,
+      "sha256": "ec8893d209949574093f81aaa2e76c2fba60e586477d2f9b03c81e09e0c23115"
+    },
+    "032010121": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=032010121/part-00177-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 33920022,
+      "sha256": "0164ca41b853bb405edf1f0c9d752c3c56677e008dff11fb9c06320899038701"
+    },
+    "023130033": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023130033/part-00004-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 25075317,
+      "sha256": "5295cad76cee60808f90c31f45e54295788128c3a6891b4088f9bd622a29a70b"
+    },
+    "032010103": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=032010103/part-00152-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 75942215,
+      "sha256": "4adf7a8cc7fd3e8d56e647b21fa70aa77890c96279829f60f62bacfcbbb1d58b"
+    },
+    "023130300": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023130300/part-00148-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 20445315,
+      "sha256": "6197da5a0d166727193776edf2f5fd448c13a3ebf63efe72c426e0d46b31e27d"
+    },
+    "023130211": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023130211/part-00183-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 49031828,
+      "sha256": "62f15e537500431be9fffccf93e6b9adaf635a29e4ea29fc2f77c92d00bb522b"
+    },
+    "023013223": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023013223/part-00149-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 34671,
+      "sha256": "361faed38ecc83d2683355fd7c720ed4c077466380fccb21f90091a1e7e64a10"
+    },
+    "023102202": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023102202/part-00124-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 133009319,
+      "sha256": "c9aa7cf81784203f85529019cd915f78aa3033f7bb2305d83302a1ce0c4b0d0c"
+    },
+    "023130122": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023130122/part-00123-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 36836721,
+      "sha256": "3c57b0e45b1bd35f883ac8033cff27b1adb2bc58ba50d13ca1f43271c6352a74"
+    },
+    "032021031": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=032021031/part-00009-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 34999045,
+      "sha256": "822ba66b236f5255bf5d7a286027bac01d37d67069411d725799dea1885d66df"
+    },
+    "032021122": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=032021122/part-00081-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 12983872,
+      "sha256": "ba4f27cd4de8f93e77e13c5738a9a18afed1445c01ff5b541e3fc7a864ced8f8"
+    },
+    "032021120": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=032021120/part-00006-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 13765534,
+      "sha256": "2a9957c0e047b1fb955f075d186f865e2b0cfb38d69a9b97ff5717be2d0fdfee"
+    },
+    "032021033": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=032021033/part-00131-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 16470509,
+      "sha256": "d79a698fb4dd56eddeaa20e0c0359f13aeae54400edd59680b68e53935f8bc94"
+    },
+    "023013221": {
+      "url": "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedStates/quadkey=023013221/part-00065-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz",
+      "bytes": 81737295,
+      "sha256": "2d64a84e624552c702c7ac43bac0ec5d4d8f8be7b5845cda4d538328b2ce91c9"
+    }
+  },
+  "microsoft_index": "https://bfppub.blob.core.windows.net/%24web/2026-08-13/dataset-links.csv"
+}

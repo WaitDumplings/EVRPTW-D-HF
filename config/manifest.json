@@ -1,0 +1,127 @@
+{
+  "schema": "stage2_full_training_derived_profile_v1",
+  "method_version": "2026-11-05-v1",
+  "scope": "full official training valid delivered bundles; shared by all target splits",
+  "canonical_donor_manifest": {
+    "filename": "manifest.json",
+    "sha256": "7d02e38b0128e07b09a48ac61b3a2e94c0fbcdf93c134b78a44d6f2fc89e95cc"
+  },
+  "canonical_source_sha256": {
+    "package_data": "9ac858358e9f43d34cb65198c03601c814328a06dec9b71ee88b40aaec7f0966",
+    "route_data": "da3a5d4e73b683d756111f0d9e6d3f20eb8e82adf7c89ee6ee0cb2239abd2f38"
+  },
+  "canonical_outputs_sha256": {
+    "parcels.parquet": "6b5bf277a1b8e25a4a3a04c7939fab1ca4e72147b00feacd404078685143020c",
+    "bundles.parquet": "561ef26be59bb8afde39441d3db62ba4baf7f5e9a54184da16644747c3ac5f31",
+    "quarantine.parquet": "b9bd33216be6c9686e7791b8e112e9ff1bc5740646dbe38ef1f6b1b996853eda"
+  },
+  "helper_sha256": "aec9757c7e30131c8e4ad306f9e1808e603c9e92894d28e05f6a4a6d6b13ecc0",
+  "source_rows": 893402,
+  "station_days": 521,
+  "training_max_observed_count": 113,
+  "pool_identity_sha256": "b3c3135bd27204d9ef6b4ea450e9e325f8b54beb35c84b8b06c985caa6445351",
+  "fit": {
+    "family": "affine_power",
+    "count_levels": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "summary": "per-count planned service median",
+    "count_weighting": "equal",
+    "residual": "log(a+b*P**nu)-log(source_count_median)",
+    "initial": [
+      10.0,
+      50.0,
+      0.9
+    ],
+    "lower_bounds": [
+      0.0,
+      0.001,
+      0.2
+    ],
+    "upper_bounds": [
+      3600.0,
+      3600.0,
+      2.0
+    ],
+    "optimizer": "scipy.optimize.least_squares",
+    "loss": "soft_l1",
+    "f_scale": 0.1,
+    "success": true,
+    "status": 2,
+    "message": "`ftol` termination condition is satisfied.",
+    "cost": 0.032782414815229345,
+    "nfev": 14,
+    "optimality": 7.384126625006202e-06,
+    "coefficients_a_b_nu": [
+      22.352826382480657,
+      35.55693188115095,
+      1.136997577364419
+    ],
+    "tail": "g(16)*(P/16)**0.5 for P>16",
+    "tail_anchor_service_s": 854.1276729407169
+  },
+  "window_semantics": {
+    "sampled_fields": [
+      "a",
+      "b"
+    ],
+    "units": "seconds offset from the source service-day local midnight",
+    "aggregation": "a=max specified package start offsets; b=min specified package end offsets",
+    "endpoint_semantics": "service start; source upper b is not reduced by service duration",
+    "target_a_b": "diagnostic clip to [08:00,24:00], not the source mode sampled by marks.py",
+    "runtime_mapping": "a/b -> location_tw_start_offset_s/location_tw_end_offset_s, shifted to target service day",
+    "sampling": "choose specified with frozen probability, then uniformly sample one whole location pattern independently of parcel count"
+  },
+  "software": {
+    "numpy": "2.3.5",
+    "pandas": "2.3.3",
+    "pyarrow": "23.0.1",
+    "scipy": "1.17.0"
+  },
+  "outputs": {
+    "calibration.json": {
+      "sha256": "d724e1fa70b31eeb50162682e577d907dc75aeb515f3918660bd2861051ec46b",
+      "bytes": 479
+    },
+    "service_residuals.parquet": {
+      "sha256": "a814462258ec0aa574faef59feb65df40b902e4e3f1969781c36b2f97574018a",
+      "bytes": 17134085
+    },
+    "location_tw_patterns.parquet": {
+      "sha256": "9e8c594b862794135d976bd311beab7e2ea84e35404872d98ee78154664a1ec8",
+      "bytes": 969369
+    },
+    "service_fit_count_medians.csv": {
+      "sha256": "d35837d89b88f598c79d9e4c9e6af4d1e98c212a6679202c7d6f7a3ca8822cc6",
+      "bytes": 354
+    },
+    "checks.json": {
+      "sha256": "f0d3c7236e3f12499a495e0dda42f6d021dbf285d8a50c5ecbebb4d38af22708",
+      "bytes": 973
+    }
+  },
+  "runtime_note": "Field names follow DEFAULT_CALIBRATION; the new schema/FULL-TRAINING pool requires the finalized generator adapter, not the old GEN-TRAIN-only config loader.",
+  "derivation_helper_sha256_before_catalog_input_extension": "32cfbdaeddcfe83b7f7b722499632682f98ce09a26861f00c2298cdb1d4245a5",
+  "helper_update": "Added equivalent full-catalog input after stop-summary derivation; fit recipe and output rules unchanged; existing numeric derivation retained.",
+  "source_inputs": {
+    "source_summary": {
+      "filename": "source_stop_summary.parquet",
+      "sha256": "0c2b3e8f7deee427fd7d355e480d0835624659ef5c9c91bc106aed153ff66240"
+    }
+  }
+}
