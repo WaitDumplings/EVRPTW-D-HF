@@ -32,7 +32,7 @@ python pipeline.py --work "$WORK" stage2 --city "$CITY" --split train --n 100 --
 
 ## 多台服务器
 
-首次单机验收使用 [Chicago 单例 prompt](docs/SERVER.zh-CN.md)。分布式生产时按城市或实例分片。
+本次 17,400 个槽位从已验收的 Chicago 工作目录续跑。A 复用 11 城联合校准，准备其余十城 CLE；B、C 接收各自负责城市的资产。逐机命令、首例复用和交付清单见[正式批量生产交接](docs/BATCH.zh-CN.md)。独立从零复现时可以使用 [Chicago 单例 prompt](docs/SERVER.zh-CN.md) 和下列分片方式。
 
 - **不同城市。** 各机用同一份来源锁下载公开原料，再设置各自的 `CITY`。下方命令用于对齐 AFDC、USACE 和 Census 的实时响应。
 - **同城多机。** 同城机器使用相同输入锁、软件版本、CPU 架构和 BLAS。各自构建、登记后，对照 `plans/<city>.json` 的 SHA-256。相同清单按下面两条命令各执行一条。节点顺序、路网文件、随机流和计划均绑定；工作路径和本机回执时间可以不同。
@@ -45,7 +45,7 @@ python pipeline.py --work "$WORK" stage2 --city "$CITY" --workers 2 --shard 1/2
 python pipeline.py --work "$WORK" audit --city "$CITY" --outputs /data/shard0 /data/shard1
 ```
 
-首次在多机建同一批时，先在各机执行下面两行。确认各机打印的哈希相同后，将第一台机器的 `live.lock.json` 存作 `REF`，再执行第三行。完整 `sources.lock.json` 的摘要用于核对原料和空间处理结果。封板时另核对 11 城共用的住宅校准文件摘要。
+需要在各机从公开源独立重建时，先在各机执行下面两行。确认各机打印的哈希相同后，将第一台机器的 `live.lock.json` 存作 `REF`，再执行第三行。完整 `sources.lock.json` 的摘要用于核对原料和空间处理结果。封板时另核对 11 城共用的住宅校准文件摘要。
 
 ```bash
 python pipeline.py --work "$WORK" sources --only live --workers 2

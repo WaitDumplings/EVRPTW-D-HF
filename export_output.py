@@ -5,19 +5,22 @@ import json
 import re
 import shutil
 import tempfile
+import zipfile
+from collections import Counter
 from pathlib import Path
 
 from evrptw_scenarios.cle_binding import cle_authority
 from export_instance import source_info
 from instance_file import (
+    RULES,
     file_header,
     read_instance,
     read_portable,
     unpack,
     write_instance,
 )
-from solver_parquet import PROBLEMS, from_restored, partition
-from stage2.common import CITIES, lock, read, sha, shared_identity, write
+from solver_parquet import PROBLEMS, from_restored, partition, source_nodes_and_info
+from stage2.common import CITIES, digest, lock, read, sha, shared_identity, write
 
 
 def city_inventory(base, shared, city):
@@ -129,6 +132,80 @@ def publish_instance(source, output):
     return write_instance(target, task, binding)
 
 
+def verify_published_archive(source, target, binding):
+    with zipfile.ZipFile(source) as compact:
+        nodes, info = source_nodes_and_info(zipfile.Path(compact))
+    header, existing = read_portable(target)
+    if (
+        info != existing.info
+        or not nodes.equals(existing.nodes)
+        or header["payload"]["cle"] != binding
+        or header["payload"]["rules"] != RULES
+    ):
+        raise ValueError(
+            f"Existing Parquet differs from its certified source: {target}"
+        )
+
+
+def publish_city_instances(work, output, city):
+    """Publish certified slots from the sealed plan, including previously delivered files."""
+    plan_file = work / "plans" / (city + ".json")
+    plan_id = sha(plan_file)
+    release = read(plan_file.parent / "release.json")
+    if release["plans_sha256"][city] != plan_id:
+        raise ValueError(f"City plan disagrees with the release index: {city}")
+    plan = read(plan_file)
+    binding = verify_city(output / "CLE" / city, city, full=False)
+    if binding["shared_sha256"] != plan["shared_sha256"]:
+        raise ValueError(f"City plan and published CLE disagree: {city}")
+    counts = {}
+    for task in plan["tasks"]:
+        split, n = task["split"], task["n"]
+        cell = counts.setdefault((split, n), Counter())
+        cell["planned"] += 1
+        part = Path(city) / split / f"Cus{n}"
+        slot = f"instance{task['slot']:04d}"
+        receipt = work / "ledger" / part / slot / "result.json"
+        if not receipt.is_file():
+            continue
+        result = read(receipt)
+        if result["signature"] != digest([plan_id, task]) or result["task"] != task:
+            raise ValueError(f"Slot belongs to a different plan: {receipt}")
+        if result["status"] != "protocol_certified":
+            continue
+        archive = Path("instances") / part / (slot + ".evrp.zip")
+        source = work / archive
+        if result["file"] != str(archive) or result["sha256"] != sha(source):
+            raise ValueError(f"Certified archive differs from its ledger: {source}")
+        identity = source_info(source)
+        name = digest([plan_id, task["task_key"], task["seed"]])[:24]
+        if result["instance_id"] != name or identity != {
+            "instance_id": name,
+            "split": split,
+            "city": city,
+            "customer_count": n,
+        }:
+            raise ValueError(f"Archive identity differs from its slot: {source}")
+        target = output / "instances" / part / (name + ".parquet")
+        if target.exists():
+            verify_published_archive(source, target, binding)
+            cell["reused"] += 1
+        else:
+            publish_instance(source, output)
+            cell["published"] += 1
+    return [
+        {
+            "city": city,
+            "split": split,
+            "n": n,
+            "planned": c["planned"],
+            "published": c["published"],
+            "reused": c["reused"],
+        }
+        for (split, n), c in sorted(counts.items())
+    ]
+
+
 def plot_instance(file, output, dest):
     import pyarrow.csv as arrow_csv
     import pyarrow.parquet as pq
@@ -204,6 +281,11 @@ def main():
         help="Publish one existing ZIP, restored directory or portable Parquet",
     )
     inst.add_argument("source", type=Path)
+    batch = subs.add_parser(
+        "city-instances", help="Publish certified slots from a sealed city plan"
+    )
+    batch.add_argument("--work", type=Path, required=True)
+    batch.add_argument("--city", choices=CITIES, required=True)
     verify = subs.add_parser(
         "verify-cle",
         help="Hash all delivered assets and optionally check an instance binding",
@@ -234,6 +316,10 @@ def main():
             print(publish_city(args.work, args.out, city))
     elif args.command == "instance":
         print(publish_instance(args.source, args.out))
+    elif args.command == "city-instances":
+        print(
+            json.dumps(publish_city_instances(args.work, args.out, args.city), indent=2)
+        )
     elif args.command == "verify-cle":
         expected = (
             file_header(args.instance)["payload"]["cle"] if args.instance else None

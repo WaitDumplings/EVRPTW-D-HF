@@ -1,5 +1,7 @@
 # 给 server agent 的单例验收 prompt
 
+Chicago 首槽已通过验收。本批从验收结果续跑，执行[三台服务器的正式生产交接](BATCH.zh-CN.md)。下文留作从零复现单例的流程。
+
 将仓库 URL、这次交付的完整 Git 提交号和可写数据盘路径发给 agent，并附以下任务。
 
 请检出指定提交，使用 Python 3.11、requirements.txt 和系统命令 osmium-tool。本轮只验收 1 个 Chicago / train / Cus100。先下载公开源，完成 11 城联合住宅户数校准，再构建 Chicago 的城市环境，使用首个登记槽位。已有缓存和同版本产物时可续用。各命令均从仓库根目录运行。

@@ -154,11 +154,13 @@ class Problem:
         }
 
 
-def from_restored(folder):
-    from stage2.common import read
-    from stage2.exchange import FIELDS, array_hashes
+def source_nodes_and_info(folder):
+    """Read the common solver inputs from a restored directory or compact ZIP root."""
+    from stage2.exchange import FIELDS
 
-    folder = Path(folder)
+    def read(path):
+        return json.loads(path.read_text(encoding="utf-8"))
+
     inst = read(folder / "instance.json")
     if (
         inst["execution_path_policy"] != "shortest_distance"
@@ -169,7 +171,7 @@ def from_restored(folder):
     orders = read(folder / "orders.json")
     customers = read(folder / "customer_activation.json")["customer_ids"]
     stations = read(folder / "station_selection.json")["selected"]
-    with (folder / "nodes.txt").open(newline="") as stream:
+    with (folder / "nodes.txt").open("r", encoding="utf-8", newline="") as stream:
         rows = list(csv.DictReader(stream, delimiter="\t"))
     ids = [inst.get("depot") or inst["depot_id"], *customers, *stations]
     types = ["depot", *(["customer"] * len(customers)), *(["charging"] * len(stations))]
@@ -198,10 +200,6 @@ def from_restored(folder):
     nodes = nodes.add_column(
         0, "instance_id", pa.array([inst["instance_id"]] * len(rows))
     )
-    with np.load(folder / "costs.npz", allow_pickle=False) as costs:
-        arrays = {k: costs[k] for k in costs.files}
-    if array_hashes(arrays, len(rows)) != inst["matrix_hashes"]:
-        raise ValueError("Source matrix hashes disagree")
     info = {
         "instance_id": inst["instance_id"],
         "problem_type": "evrptw",
@@ -226,6 +224,18 @@ def from_restored(folder):
         "matrix_sha256_json": json.dumps(inst["matrix_hashes"], sort_keys=True),
         "nodes_sha256": json_sha256(nodes.to_pylist()),
     }
+    return nodes, info
+
+
+def from_restored(folder):
+    from stage2.exchange import array_hashes
+
+    folder = Path(folder)
+    nodes, info = source_nodes_and_info(folder)
+    with np.load(folder / "costs.npz", allow_pickle=False) as costs:
+        arrays = {k: costs[k] for k in costs.files}
+    if array_hashes(arrays, len(nodes)) != json.loads(info["matrix_sha256_json"]):
+        raise ValueError("Source matrix hashes disagree")
     return Problem(info, nodes, arrays)
 
 

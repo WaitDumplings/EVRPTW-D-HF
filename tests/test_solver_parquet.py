@@ -1,4 +1,5 @@
 import json
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -79,6 +80,92 @@ def example(folder):
         },
     )
     return from_restored(folder), arrays
+
+
+def test_city_publication_reuses_checked_parquet_without_restoring(
+    tmp_path, monkeypatch
+):
+    import export_output
+    from instance_file import write_instance
+    from stage2.common import digest
+
+    work, out = tmp_path / "work", tmp_path / "out"
+    task = {
+        "city": "chicago",
+        "split": "train",
+        "n": 2,
+        "slot": 1,
+        "task_key": [1],
+        "seed": 1,
+    }
+    extra_tasks = [dict(task, slot=i, task_key=[i]) for i in (2, 3)]
+    plan = work / "plans/chicago.json"
+    write(plan, {"shared_sha256": "shared", "tasks": [task, *extra_tasks]})
+    plan_id = sha(plan)
+    write(plan.parent / "release.json", {"plans_sha256": {"chicago": plan_id}})
+    name = digest([plan_id, [1], 1])[:24]
+    fixture = tmp_path / name
+    example(fixture)
+    source = read(fixture / "instance.json")
+    write(
+        fixture / "instance.json",
+        dict(source, shared_sha256="shared", protocol_status="protocol_certified"),
+    )
+    archive = Path("instances/chicago/train/Cus2/instance0001.evrp.zip")
+    (work / archive).parent.mkdir(parents=True)
+    with zipfile.ZipFile(work / archive, "w") as z:
+        for file in fixture.iterdir():
+            if file.suffix != ".npz":
+                z.write(file, file.name)
+    ledger = work / "ledger/chicago/train/Cus2"
+    write(
+        ledger / "instance0001/result.json",
+        {
+            "task": task,
+            "status": "protocol_certified",
+            "signature": digest([plan_id, task]),
+            "file": str(archive),
+            "sha256": sha(work / archive),
+            "instance_id": name,
+        },
+    )
+    failed = extra_tasks[0]
+    write(
+        ledger / "instance0002/result.json",
+        {
+            "task": failed,
+            "status": "generation_failed",
+            "signature": digest([plan_id, failed]),
+        },
+    )
+    binding = {
+        "city": "chicago",
+        "shared_sha256": "shared",
+        "calibration_sha256": "cal",
+        "cle_manifest_sha256": "cle",
+    }
+    monkeypatch.setattr(export_output, "verify_city", lambda *args, **kwargs: binding)
+    published = out / "instances/chicago/train/Cus2" / (name + ".parquet")
+    monkeypatch.setattr(
+        export_output,
+        "publish_instance",
+        lambda src, dest: write_instance(published, from_restored(fixture), binding),
+    )
+    [first] = export_output.publish_city_instances(work, out, "chicago")
+    assert (first["planned"], first["published"], first["reused"]) == (3, 1, 0)
+    monkeypatch.setattr(
+        export_output, "publish_instance", lambda *args: pytest.fail("Repeated restore")
+    )
+    [second] = export_output.publish_city_instances(work, out, "chicago")
+    assert (second["published"], second["reused"]) == (0, 1)
+
+    # A valid portable file for the same ID can still contain a different vehicle.
+    vehicle = read(fixture / "vehicle.json")
+    write(fixture / "vehicle.json", dict(vehicle, cargo_capacity_cm3=1))
+    published.unlink()
+    write_instance(published, from_restored(fixture), binding)
+    with pytest.raises(ValueError, match="differs from its certified source"):
+        export_output.publish_city_instances(work, out, "chicago")
 
 
 def test_direct_and_published_views_match_asymmetric_source(tmp_path):
