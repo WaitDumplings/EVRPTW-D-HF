@@ -212,6 +212,7 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     pd.DataFrame(rows).to_parquet(report / "slots.parquet", index=False)
     monkeypatch.setattr(export_output, "publish_instance", publish)
     calls = []
+    success_at = 10
 
     def run(plan, shared, catalog, job, *args):
         if (job / "ledger/chicago/train/Cus2/instance0002/result.json").exists():
@@ -222,7 +223,7 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
             t,
             plan,
             job,
-            "generation_failed" if len(calls) == 1 else "protocol_certified",
+            "generation_failed" if len(calls) < success_at else "protocol_certified",
         )
 
     monkeypatch.setattr(stage2.batch, "run", run)
@@ -234,22 +235,41 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
         split="train",
         n=2,
         slot=2,
-        attempts=2,
+        attempts=1,
     )
     with pytest.raises(ValueError, match="Provide a certified choice"):
         qr.seal(args)
-    qr.draw(args)
-    assert len({t["seed"] for t in calls}) == 2 and all(
+    # A finite manual run may leave a failed draw. City fill continues at the next
+    # distinct seed, without rebuilding any certified slot or replaying the failure.
+    with pytest.raises(ValueError, match="No accepted draw"):
+        qr.draw(args)
+    qr.seal(args, fill_capacity=True)
+    assert len({t["seed"] for t in calls}) == success_at and all(
         t["task_key"] == tasks[1]["task_key"] for t in calls
     )
     qr.seal(args)
-    qr.seal(args)
+    directory = work / "quota-draws/chicago"
+    saved = directory / "train/Cus2/instance0002/choice.json"
+    # An external choice can fill the same slot even if only its ZIP was delivered.
+    write(directory / "choices.json", [read(saved)])
+    saved.unlink()
+    (output / "_release/chicago").rename(tmp_path / "first-seal")
+    supplemental_id = read(read(directory / "choices.json")[0]["receipt"])[
+        "instance_id"
+    ]
+    (output / "instances/chicago/train/Cus2" / (supplemental_id + ".parquet")).unlink()
+    qr.seal(args, fill_capacity=True)
+    (directory / "choices.json").unlink()
+    # A previously sealed city (including a legacy B shard) needs no private map.
+    qr.seal(args, fill_capacity=True)
+    assert len(calls) == success_at
     dest = tmp_path / "release"
     merge = SimpleNamespace(shards=[output], out=dest, check_only=True)
     qr.merge(merge)
     merge.check_only = False
     qr.merge(merge)
     df = pd.read_parquet(dest / "index.parquet")
+    assert set(df.instance_id) == {rows[0]["instance_id"], supplemental_id}
     assert len(df) == 2 and all(not ("slot" in c or "retry" in c) for c in df.columns)
     assert (
         read(dest / "release.json")["original_capacity_rejections"]["chicago"][0][
@@ -268,3 +288,79 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="Checksum mismatch"):
         qr.merge(merge)
     assert not merge.out.exists()
+
+
+@pytest.mark.parametrize(
+    "last_status", ["protocol_certified", "generation_failed", "execution_error"]
+)
+def test_fixed_depot_rejection_tries_next_depot_on_same_day(
+    tmp_path, monkeypatch, last_status
+):
+    city = "chicago"
+    loc = pd.DataFrame(
+        {"location_type": ["depot", "depot"], "bg_geoid": ["B1", "B2"]},
+        index=["D1", "D2"],
+    )
+    shared = tmp_path / "shared" / city
+    shared.mkdir(parents=True)
+    loc.to_parquet(shared / "locations.parquet")
+    task = {
+        "city": city,
+        "split": "train",
+        "n": 100,
+        "cs_budget": 10,
+        "slot": 1,
+        "serial": 0,
+        "seed": 7,
+        "depot": "D1",
+        "depot_bg": "B1",
+        "date": "2026-11-03",
+        "day_type": "weekday",
+        "task_key": [city, "train", 100, 1, "D1", "2026-11-03", "weekday"],
+    }
+    panel = {"root_seed": 7}
+    actual = []
+
+    def run(plan, shared, catalog, job, *args):
+        t = read(plan)["tasks"][0]
+        actual.append(t)
+        r = {"status": last_status, "signature": digest([sha(plan), t]), "task": t}
+        if last_status == "protocol_certified":
+            zip_path = job / "example.zip"
+            zip_path.write_bytes(b"fixture")
+            r.update(file="example.zip", sha256=sha(zip_path))
+        if last_status == "generation_failed":
+            r["reason"] = "empty_ratio_support"
+        write(job / "ledger/chicago/train/Cus100/instance0001/result.json", r)
+
+    monkeypatch.setattr(stage2.batch, "run", run)
+    monkeypatch.setattr(export_output, "publish_instance", lambda *a: None)
+    args = (
+        tmp_path,
+        tmp_path / "out",
+        panel,
+        "original",
+        task,
+        "insufficient_depot_capacity",
+    )
+    if last_status == "protocol_certified":
+        choice = qr.draw_capacity_slot(*args)
+        assert choice["capacity_fallback_depot"] == "D2"
+    else:
+        with pytest.raises(
+            ValueError,
+            match="No depot supports"
+            if last_status == "generation_failed"
+            else "execution_error",
+        ):
+            qr.draw_capacity_slot(*args)
+    assert len(actual) == 1
+    t = actual[0]
+    assert (
+        t["depot"],
+        t["depot_bg"],
+        t["task_key"][4],
+        t["date"],
+        t["split"],
+        t["n"],
+    ) == ("D2", "B2", "D2", task["date"], "train", 100)

@@ -28,4 +28,5 @@ for city in "${cities[@]}"; do
     mkdir -p "$report"
     python pipeline.py --work "$WORK" audit --city "$city" > "$report/audit.json"
     python export_output.py --out "$OUTPUT" city-instances --work "$WORK" --city "$city" > "$report/publish.json"
+    python quota_release.py fill --work "$WORK" --output "$OUTPUT" --city "$city"
 done

@@ -32,7 +32,7 @@ python pipeline.py --work "$WORK" stage2 --city "$CITY" --split train --n 100 --
 
 ## 多台服务器
 
-四台机器各自按城市从公开源构造 CLE 和实例，共 17,400 个预登记槽位。各机的生成命令见[批量生产说明](docs/BATCH.zh-CN.md)。足额发布使用 `quota_release.py seal` 逐城核对已有实例及补样。四台先回传每城的三份小清单，汇总机用 `merge --check-only` 预检 17,400 例。[逐城配额、清单打包和正式汇总](docs/CITY_DELIVERY.zh-CN.md)
+四台机器各自按城市从公开源构造 CLE 和实例，共 17,400 个预登记槽位。各机的生成命令见[批量生产说明](docs/BATCH.zh-CN.md)。批量入口在每城导出后执行 `quota_release.py fill`，复用已有补样并自动重抽仍有候选容量缺口的槽位，直至该城各组足额。四台先回传每城的三份小清单，汇总机用 `merge --check-only` 预检 17,400 例。[逐城配额、清单打包和正式汇总](docs/CITY_DELIVERY.zh-CN.md)
 
 ## 绘图和恢复
 

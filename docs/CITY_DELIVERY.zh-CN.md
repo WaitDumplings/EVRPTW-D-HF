@@ -28,7 +28,7 @@
 
 - 已认证且文件完好的实例直接交付。已有认证 ZIP 但缺 Parquet 时从原 ZIP 导出。中断、磁盘错误和文件损坏先恢复同一次执行。
 - 对确认由候选容量引起的生成失败，优先沿用原城市、split、N、CS 数、depot 和具体服务日期，按预定 seed 顺序重新调用相同生成器，接纳第一个通过相同认证的实例。客户、订单和站点照常生成。失败与地理条件可能相关，降低 R 或改抽市中心 depot 会改变抽样分布。
-- 之前已补好的样本优先核对已有证据。城市、split、N、CS 数、日型、CLE、生成方法及认证一致，且是按原尝试顺序接受的首个合格样本，即可复用。之前若按正常分层规则换过 depot 或日期，核对生成记录并汇报汇总数量。若某 depot 可供地点总数本来就小于 N，或可用经验 R 支持为空，换 seed 不能解决；列出该分组交项目负责人决定如何处理。
+- 之前已补好的样本优先核对已有证据。城市、split、N、CS 数、日型、CLE、生成方法及认证一致，且是按原尝试顺序接受的首个合格样本，即可复用。之前若按正常分层规则换过 depot 或日期，核对生成记录并汇报汇总数量。若某 depot 的可供地点总数小于 N，或可用经验 R 支持为空，则保持服务日期不变，按该城既有的分层 depot 顺序选择下一个 depot。只有所有 depot 均已证实存在这类固定容量不足时，才报该槽位在本城无法满足。
 - 记录保存在生成机。原始计划、首轮失败回执、后续尝试和新旧映射用于内部追溯。数据集卡写明“在相同构造条件下抽样至各组足额”，可按城市、规模、split 汇报拒绝数量。首轮拒绝率的分母是原计划槽位数；若另算全程拒绝率，分母是去重的实际随机抽取次数，排除执行错误和同一抽取的文件重导出。
 
 ## 3. 生成机本轮交付小清单
@@ -36,15 +36,15 @@
 在单独的发布代码目录检出派单给出的 GitHub commit，沿用生产环境中的 Python 依赖。将 `WORK`、`OUTPUT` 分别设为本机已有工作目录和导出目录的绝对路径。原始计划与来源回执记录实际生成版本，首发生产参考提交为 `e2cf4825dd6a7c4ecd2cf88bef6cb206908ae50e`。回执分别写明生成版本和这次使用的发布脚本版本。
 
 1. 按城市、split、N 盘点现有文件。先核对首轮认证实例和已经补好的实例，包含单独 `supplements/` 目录中的成品。只缺标准位置的 Parquet 时，从已验收的 Parquet 或紧凑 ZIP 做本地导出。
-2. 每城运行 `seal`。它读取首轮的 `reports/<city>/plan.json`、`slots.parquet`、实际 ZIP、回执与实例文件。已有补样的私有映射用下文的 `--choices`。首轮计划、失败记录和所有真实 seed 保留在生成机。
-3. 按组回报目标数、已核对的正式实例数、缺口，以及原因为容量拒绝或执行异常的槽位。缺口或证据不一致时，交回已经核对的城市并写明哪些城市待处理。此次只复用和核对已有实例，新抽样单独安排。
+2. 每城运行 `fill`。已有足额城市清单时，核对清单、城市绑定和实例文件摘要后直接复用。未封存的城市先采用已有认证样本；对确有候选容量缺口的槽位，从下一次确定性抽样继续，接受首个认证成功的实例。一条失败和它的成功补样在配额中合计一例。首轮计划、尝试和已存在的补样映射保存在生成机。
+3. 按城市、split、N 回报目标数、合格数和仍待处理的异常。已通过逐格配额和去重检查的正式清单可直接验收；中心机按公开索引计数，私有替代表留在生成机。执行错误沿用原任务恢复，其余方法或认证失败保留原因。
 4. 回传本机小清单压缩包、SHA-256、生成与发布代码版本、输出根目录、待传实例及 CLE 等文件的总字节数。发回小清单即结束本轮任务。大文件留在生成机，等项目负责人另行通知传输。
 
 ```bash
-python quota_release.py seal --work "$WORK" --output "$OUTPUT" --city "$CITY"
+python quota_release.py fill --work "$WORK" --output "$OUTPUT" --city "$CITY"
 ```
 
-已有独立补样工作目录时，给上述命令增加 `--choices /path/to/private-choices.json`。这是生成机内部用的 JSON 数组，每行对象如下。路径填实际成功抽取的原始文件。现有 Parquet 在标准位置时直接使用。若成品另存在 `supplements/`，优先用 `python export_output.py --out "$OUTPUT" instance "$EXISTING_PARQUET"` 在本机导出到标准目录。仅有认证 ZIP 时，把输入改为真实 ZIP 路径。两种方式均沿用现有实例 ID。
+尚未封存且已有独立补样工作目录时，在生成机把既有映射放到 `$WORK/quota-draws/<city>/choices.json`，或给上述命令增加 `--choices /path/to/private-choices.json`。这是生成机内部用的 JSON 数组，每行对象如下。路径填实际成功抽取的原始文件。现有 Parquet 在标准位置时直接使用。若成品另存在 `supplements/`，优先用 `python export_output.py --out "$OUTPUT" instance "$EXISTING_PARQUET"` 在本机导出到标准目录。仅有认证 ZIP 时，把输入改为真实 ZIP 路径。两种方式均沿用现有实例 ID。
 
 ```json
 [{"split":"train","n":500,"slot":17,"plan":"/actual/draw-plan.json","receipt":"/actual/result.json","archive":"/actual/instance.evrp.zip"}]
@@ -81,9 +81,9 @@ python quota_release.py seal --work "$WORK" --output "$OUTPUT" --city "$CITY"
 
 每格的实际实例数可从已写出的 `_release/<city>/index.parquet` 按 `split,n` 分组计数。需要整机待传大小时，对各城 `files.txt` 中的相对路径去重，加总 `OUTPUT` 下对应文件的 `stat().st_size`。下面两节分别供缺口处理和后续正式传输时使用。
 
-### 后续经确认的缺口处理
+### 单槽位调试与只读核对
 
-确实尚未补齐、而且原失败是可通过重抽解决的容量缺口时，可使用内置 draw 命令。以下是假设的槽位，仅说明用法。`--attempts` 表示本次允许运行至第几个尝试号；续跑保持同一顺序，取首个合格样本。工具在原 WORK 的 quota-draws 下保存少量独立尝试；seal 自动找到其 choice.json。
+日常生产由 `scripts/generate_cities.sh` 在每城首轮导出后调用 `fill`。自动补额没有固定重试次数。中断后重跑同一命令，已完成的容量拒绝和成功样本按原尝试顺序复用。单独调试一个槽位时可用下面的 `draw --attempts` 指定最后一个尝试号。只核对原有源回执时仍可用 `seal`。
 
 ```bash
 python quota_release.py draw --work "$WORK" --output "$OUTPUT" \

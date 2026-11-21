@@ -1,6 +1,7 @@
 """Assemble a quota-complete public release from certified city instances."""
 
 import argparse
+import itertools
 import json
 import os
 import shutil
@@ -25,7 +26,7 @@ from stage2.common import (
     sha,
     write,
 )
-from stage2.plan import QUOTA, city_contract
+from stage2.plan import QUOTA, city_contract, depot_order
 
 PROVENANCE = (
     "inventory.json",
@@ -36,10 +37,10 @@ PROVENANCE = (
     "public_sources.json",
 )
 CONFIG = PROJECT / "config"
-CAPACITY = {
+FIXED_DEPOT_CAPACITY = {"insufficient_depot_capacity", "empty_ratio_support"}
+CAPACITY = FIXED_DEPOT_CAPACITY | {
     "insufficient_reachable_frontier_capacity",
-    "insufficient_depot_capacity",
-    "empty_ratio_support",
+    "insufficient_tracts_for_seed_count",
 }
 META = "_release"
 PUBLIC_COLUMNS = (
@@ -179,9 +180,6 @@ def validate_rows(city, df):
 
 def draw(args):
     """Generate only missing certified content for one recorded capacity failure."""
-    from export_output import publish_instance
-    from stage2.batch import run
-
     work, output, city = args.work.resolve(), args.output.resolve(), args.city
     plan_path = work / "plans" / (city + ".json")
     panel = read(plan_path)
@@ -199,14 +197,41 @@ def draw(args):
         and orig.get("reason") in CAPACITY,
         "Only an identified capacity rejection is eligible",
     )
-    require(
-        orig["reason"] != "insufficient_depot_capacity"
-        and orig["reason"] != "empty_ratio_support",
-        "This depot's eligible supply or R support is fixed; report the slot separately",
+    draw_capacity_slot(
+        work, output, panel, parent_hash, task, orig["reason"], args.attempts
     )
+
+
+def draw_capacity_slot(work, output, panel, parent_hash, task, reason, attempts=None):
+    """Advance this logical slot's deterministic draw stream; keep completed attempts on resume."""
+    from export_output import publish_instance
+    from stage2.batch import run
+
+    city = task["city"]
+    rel = Path(city) / task["split"] / f"Cus{task['n']}" / f"instance{task['slot']:04d}"
     home = work / "quota-draws" / rel
+    depot = task["depot"]
+    alternatives = None
     with lock(home / "draw.lock"):
-        for attempt in range(1, args.attempts + 1):
+        for attempt in itertools.count(1):
+            if attempts is not None and attempt > attempts:
+                raise ValueError(
+                    f"No accepted draw in attempts 1..{attempts}; records: {home}"
+                )
+            if reason in FIXED_DEPOT_CAPACITY:
+                if alternatives is None:
+                    loc = pd.read_parquet(
+                        work / "shared" / city / "locations.parquet",
+                        columns=["location_type", "bg_geoid"],
+                    )
+                    ordered = depot_order(loc, panel["root_seed"], city)
+                    start = ordered.index(depot)
+                    alternatives = iter(ordered[start + 1 :] + ordered[:start])
+                depot = next(alternatives, None)
+                require(
+                    depot is not None,
+                    f"No depot supports {city}/{task['day_type']}/Cus{task['n']}; slot {task['slot']}",
+                )
             job = home / str(attempt)
             actual = dict(
                 task,
@@ -217,6 +242,13 @@ def draw(args):
                     16,
                 ),
             )
+            if depot != task["depot"]:
+                actual.update(
+                    depot=depot,
+                    depot_bg=str(loc.at[depot, "bg_geoid"]),
+                    task_key=task["task_key"].copy(),
+                )
+                actual["task_key"][4] = depot
             tasks = [actual]
             new_plan = dict(panel, tasks=tasks, tasks_sha256=digest(tasks))
             plan_file = job / "draw.json"
@@ -226,23 +258,35 @@ def draw(args):
                 )
             else:
                 write(plan_file, new_plan)
-            run(
-                plan_file,
-                work / "shared" / city,
-                work / "public/amazon",
-                job,
-                1,
-                None,
-                None,
-                None,
-                "0/1",
-            )
             record = job / "ledger" / rel / "result.json"
-            result = read(record)
+            result = read(record) if record.exists() else None
+            if result is not None:
+                require(
+                    result["signature"] == digest([sha(plan_file), actual])
+                    and result["task"] == actual,
+                    f"Previous draw refers to a different task: {record}",
+                )
+            if result is None or result["status"] in {
+                "execution_error",
+                "protocol_certified",
+            }:
+                run(
+                    plan_file,
+                    work / "shared" / city,
+                    work / "public/amazon",
+                    job,
+                    1,
+                    None,
+                    None,
+                    None,
+                    "0/1",
+                )
+                result = read(record)
             if (
                 result["status"] == "generation_failed"
                 and result.get("reason") in CAPACITY
             ):
+                reason = result["reason"]
                 continue
             require(
                 result["status"] == "protocol_certified",
@@ -255,23 +299,62 @@ def draw(args):
             )
             publish_instance(archive, output)
             choice = {
-                "split": args.split,
-                "n": args.n,
-                "slot": args.slot,
+                "split": public_split(city, task["split"]),
+                "n": task["n"],
+                "slot": task["slot"],
                 "receipt": str(record),
                 "archive": str(archive),
                 "plan": str(plan_file),
             }
+            if depot != task["depot"]:
+                choice["capacity_fallback_depot"] = depot
             write(home / "choice.json", choice)
             print(home / "choice.json")
-            return
-        raise ValueError(
-            f"No accepted draw in attempts 1..{args.attempts}; records: {home}"
-        )
+            return choice
 
 
-def seal(args):
+def seal(args, *, fill_capacity=False):
     city, output, work = args.city, args.output.resolve(), args.work.resolve()
+    with lock(output / ".locks" / f"{city}-quota.lock"):
+        seal_city(city, output, work, args.choices, fill_capacity)
+
+
+def read_city_index(folder, city):
+    meta = read(folder / "city.json")
+    index = folder / "index.parquet"
+    require(
+        meta["city"] == meta["binding"]["city"] == city
+        and sha(index) == meta["index_sha256"],
+        f"Changed manifest: {city}",
+    )
+    df = pd.read_parquet(index)
+    validate_rows(city, df)
+    return meta, df
+
+
+def verified_assets(output, city, inventory, authority, binding):
+    assets = {f"CLE/{city}/{p.as_posix()}": v[1] for p, v in inventory.items()}
+    evidence = output / "reports" / city / "provenance"
+    declared = read(evidence / "calibration-ready.json")["files"]
+    require(
+        sha(evidence / "inventory.json") == authority["inputs_sha256"]
+        and digest(declared) == binding["calibration_sha256"]
+        and read(evidence / "calibration.json")["cities"] == [city]
+        and all(
+            sha(evidence / f) == declared["units/" + f]
+            for f in ("metric_scales.csv", "quality_thresholds.json")
+        ),
+        f"Different model inputs: {city}",
+    )
+    for f in PROVENANCE:
+        assets[f"reports/{city}/provenance/{f}"] = sha(evidence / f)
+    for path, expected in assets.items():
+        require(sha(output / path) == expected, f"Changed city asset: {path}")
+
+    return assets
+
+
+def seal_city(city, output, work, choices, fill_capacity):
     plan_path = output / "reports" / city / "plan.json"
     plan = read(plan_path)
     contract = city_contract(city, plan)
@@ -287,10 +370,42 @@ def seal(args):
         f"Wrong city fit: {city}",
     )
     contract["stage1_engine_sha256"] = authority["engine_sha256"]
+    assets = verified_assets(output, city, inventory, authority, binding)
+    target = output / META / city
+    if fill_capacity and target.exists():
+        # An accepted legacy city can include externally generated supplements.
+        # Its final index is authoritative for quota accounting.
+        meta, df = read_city_index(target, city)
+        require(
+            meta["contract"] == contract
+            and meta["binding"] == binding
+            and meta["files"] == assets,
+            f"Different sealed city or method: {city}",
+        )
+        for row in df.itertuples(index=False):
+            require(
+                sha(output / row.path) == row.sha256,
+                f"Changed sealed instance: {row.path}",
+            )
+        listed = (target / "files.txt").read_text().splitlines()
+        expected = sorted(
+            [
+                *meta["files"],
+                *df.path,
+                f"{META}/{city}/city.json",
+                f"{META}/{city}/index.parquet",
+            ]
+        )
+        require(sorted(listed) == expected, f"Different sealed transfer list: {city}")
+        print(f"{city}: reusing {len(df)} sealed instances")
+        return
     vehicle = read(CONFIG / "vehicle.json")
     overrides = {}
-    if args.choices:
-        for choice in read(args.choices):
+    city_choices = work / "quota-draws" / city / "choices.json"
+    if choices is None and city_choices.is_file():
+        choices = city_choices
+    if choices:
+        for choice in read(choices):
             key = choice["split"], choice["n"], choice["slot"]
             require(key not in overrides, f"Duplicate choice: {key}")
             overrides[key] = choice
@@ -338,6 +453,15 @@ def seal(args):
             and original["status"] == initial.status,
             f"Original receipt mismatch: {key}",
         )
+        if (
+            fill_capacity
+            and choice is None
+            and original["status"] == "generation_failed"
+            and original.get("reason") in CAPACITY
+        ):
+            choice = draw_capacity_slot(
+                work, output, plan, original_plan_sha, task, original["reason"]
+            )
         if choice is None:
             receipt = original
             require(
@@ -361,6 +485,13 @@ def seal(args):
         )
         rel = Path("instances") / city / key[0] / f"Cus{key[1]}" / (name + ".parquet")
         portable = output / rel
+        if fill_capacity and not portable.exists():
+            from export_output import publish_instance
+
+            require(
+                publish_instance(archive, output) == portable,
+                f"Certified archive did not export to the expected path: {rel}",
+            )
         row, instance = describe(archive, portable, receipt, binding, vehicle)
         require(
             (row["city"], row["split"], row["n"], row["cs_budget"], row["day_type"])
@@ -397,7 +528,12 @@ def seal(args):
             )
             require(
                 not changed
-                or choice.get("reviewed_existing_depot_date_change") is True,
+                or choice.get("reviewed_existing_depot_date_change") is True
+                or (
+                    default_choice.is_file()
+                    and choice.get("capacity_fallback_depot") == new_task["depot"]
+                    and new_task["date"] == task["date"]
+                ),
                 f"Review existing depot/date difference: {key}",
             )
             require(
@@ -423,23 +559,6 @@ def seal(args):
         ["split", "n", "instance_id"]
     )
     validate_rows(city, df)
-    assets = {f"CLE/{city}/{p.as_posix()}": v[1] for p, v in inventory.items()}
-    evidence = plan_path.parent / "provenance"
-    declared = read(evidence / "calibration-ready.json")["files"]
-    require(
-        sha(evidence / "inventory.json") == authority["inputs_sha256"]
-        and digest(declared) == binding["calibration_sha256"]
-        and read(evidence / "calibration.json")["cities"] == [city]
-        and all(
-            sha(evidence / f) == declared["units/" + f]
-            for f in ("metric_scales.csv", "quality_thresholds.json")
-        ),
-        f"Different model inputs: {city}",
-    )
-    for f in PROVENANCE:
-        assets[f"reports/{city}/provenance/{f}"] = sha(evidence / f)
-    for path, expected in assets.items():
-        require(sha(output / path) == expected, f"Changed city asset: {path}")
 
     meta = Path(META) / city
     parent = output / META
@@ -501,16 +620,7 @@ def merge(args):
                 city in CITIES and city not in catalogs,
                 f"Unexpected/duplicate city: {city}",
             )
-            meta = read(p)
-            index = p.parent / "index.parquet"
-            require(
-                meta["city"] == city
-                and meta["binding"]["city"] == city
-                and sha(index) == meta["index_sha256"],
-                f"Changed manifest: {city}",
-            )
-            df = pd.read_parquet(index)
-            validate_rows(city, df)
+            meta, df = read_city_index(p.parent, city)
             catalogs[city] = root, meta, df
     require(
         set(catalogs) == set(CITIES), f"Missing cities: {set(CITIES) - catalogs.keys()}"
@@ -624,11 +734,12 @@ def merge(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     subs = parser.add_subparsers(dest="command", required=True)
-    p = subs.add_parser("seal")
-    p.add_argument("--work", type=Path, required=True)
-    p.add_argument("--output", type=Path, required=True)
-    p.add_argument("--city", choices=CITIES, required=True)
-    p.add_argument("--choices", type=Path)
+    for command in ("seal", "fill"):
+        p = subs.add_parser(command)
+        p.add_argument("--work", type=Path, required=True)
+        p.add_argument("--output", type=Path, required=True)
+        p.add_argument("--city", choices=CITIES, required=True)
+        p.add_argument("--choices", type=Path)
     p = subs.add_parser("draw")
     p.add_argument("--work", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
@@ -647,4 +758,7 @@ if __name__ == "__main__":
     p.add_argument("--out", type=Path)
     p.add_argument("--check-only", action="store_true")
     args = parser.parse_args()
-    {"seal": seal, "merge": merge, "draw": draw}[args.command](args)
+    if args.command in {"fill", "seal"}:
+        seal(args, fill_capacity=args.command == "fill")
+    else:
+        {"merge": merge, "draw": draw}[args.command](args)
