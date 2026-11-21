@@ -25,15 +25,10 @@ bash scripts/generate_cities.sh A
 
 各机可同时启动。默认按城串行构建 CLE，`CLE_WORKERS` 可并行构建本机多城。`WORKERS` 控制同城实例进程数，每进程加载一份路网和订单库。中断后使用同一命令与目录续跑，保留原任务、seed 和失败原因。Chicago 的首槽也从本城新 CLE 生成。
 
-每台交付整个 `city-v2-output/`。其中 `CLE/<city>/` 为本城环境，`instances/<city>/<split>/Cus<N>/` 为认证实例，`reports/<city>/` 含计划、逐槽状态、实例 SHA-256、审计及导出计数。查看审计里的 `issues` 和 `pending`，修复执行错误后原地续跑。构造失败和未获见证的槽位按原状态交付。原始下载、ZIP 和详细尝试台账留在生成机的工作目录。
+每台生成机保留已有的 `city-v2-work/` 和 `city-v2-output/`。前者保存认证 ZIP 与尝试台账，后者含本机城市的 CLE、求解器实例和逐槽回执。
 
-## 合并成数据集
+## 生产完成后的交付
 
-把四份输出放到汇总机可读的四个目录，再执行以下命令。目标目录由命令创建。同盘优先用硬链接，跨盘复制。汇总机只消费成品。
+足额公开版使用 `quota_release.py`。各机按首轮回执和已认证的补样逐城核对现有文件，先回传小清单。汇总机预检后，由项目负责人另行安排大文件传输。[配额、补样复用、清单打包与汇总](CITY_DELIVERY.zh-CN.md)
 
-```bash
-python merge_dataset.py --shards /incoming/A /incoming/B /incoming/C /incoming/D \
-    --out /data/EVRPTW-D
-```
-
-汇总时逐城核对配额、终态、CLE 绑定、实例 ID、CS 数和文件摘要。随包 README 将 Hugging Face Viewer 的默认表设为实例索引，另提供含全部构造结果的 slots 视图。每份认证实例保留一个 Parquet，供 CVRP、VRPTW 和 EVRPTW 三种视图使用。根目录的 `index.parquet` 每行对应一个可读实例，含城市、split、规模、站数、ID 和相对路径。`slots.parquet` 每行对应一个计划槽位，包括未发布原因。`release.json` 汇总实际发布数与各城来源、拟合及 CLE 指纹。`reports/<city>/plan.json` 保存日期、仓库和运行环境。
+`merge_dataset.py` 用于按首轮计划汇总所有槽位及其状态，保留该版本的审计用途。

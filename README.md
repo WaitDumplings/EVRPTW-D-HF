@@ -32,7 +32,7 @@ python pipeline.py --work "$WORK" stage2 --city "$CITY" --split train --n 100 --
 
 ## 多台服务器
 
-四台机器各自按城市从公开源构造 CLE 和实例，共 17,400 个预登记槽位。每台执行 `bash scripts/generate_cities.sh A`（最后一个参数为本机字母）。完成后用 `merge_dataset.py` 合并，生成可按城市、split 和规模检索的 Parquet 索引。[分工、批量命令和交付目录](docs/BATCH.zh-CN.md)
+四台机器各自按城市从公开源构造 CLE 和实例，共 17,400 个预登记槽位。各机的生成命令见[批量生产说明](docs/BATCH.zh-CN.md)。足额发布使用 `quota_release.py seal` 逐城核对已有实例及补样。四台先回传每城的三份小清单，汇总机用 `merge --check-only` 预检 17,400 例。[逐城配额、清单打包和正式汇总](docs/CITY_DELIVERY.zh-CN.md)
 
 ## 绘图和恢复
 
