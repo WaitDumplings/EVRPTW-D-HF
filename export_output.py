@@ -13,14 +13,21 @@ from pathlib import Path
 from evrptw_scenarios.cle_binding import cle_authority
 from export_instance import release_info, source_info
 from instance_file import (
+    FORMAT,
+    HF_FORMAT,
     RULES,
     file_header,
-    read_instance,
     read_portable,
     unpack,
     write_instance,
 )
-from solver_parquet import PROBLEMS, from_restored, partition, source_nodes_and_info
+from solver_parquet import (
+    HF_INFO_FIELDS,
+    PROBLEMS,
+    from_restored,
+    partition,
+    source_nodes_and_info,
+)
 from stage2.common import (
     CITIES,
     digest,
@@ -138,12 +145,14 @@ def publish_city(work, output, city):
 
 def publish_instance(source, output):
     expected = None
+    schema = FORMAT
     if source.is_dir():
         task = from_restored(source)
     elif source.suffix == ".parquet":
         header, task = read_portable(source)
         task = replace(task, info=release_info(task.info))
         expected = header["payload"]["cle"]
+        schema = header["schema"]
     else:
         from stage2.generate import restore
 
@@ -160,13 +169,15 @@ def publish_instance(source, output):
         raise ValueError("Invalid city or instance identifier")
     binding = verify_city(output / "CLE" / city, city, expected=expected, full=False)
     target = output / "instances" / city / split / scale / (name + ".parquet")
-    return write_instance(target, task, binding)
+    return write_instance(target, task, binding, schema=schema)
 
 
 def verify_published_archive(source, target, binding):
     with zipfile.ZipFile(source) as compact:
         nodes, info = source_nodes_and_info(zipfile.Path(compact))
     header, existing = read_portable(target)
+    if header["schema"] == HF_FORMAT:
+        info = {key: info[key] for key in HF_INFO_FIELDS}
     if (
         info != release_info(existing.info)
         or not nodes.equals(existing.nodes)
@@ -318,9 +329,12 @@ def plot_instance(file, output, dest):
 
 def verify_instance(path, restored):
     source = from_restored(restored)
-    portable = read_instance(path)
+    header, portable = read_portable(path)
+    expected = source.info
+    if header["schema"] == HF_FORMAT:
+        expected = {key: expected[key] for key in HF_INFO_FIELDS}
     # Both readers verify the four matrix digests and the ordered node table.
-    if source.info != release_info(portable.info) or not source.nodes.equals(
+    if expected != release_info(portable.info) or not source.nodes.equals(
         portable.nodes
     ):
         raise ValueError("Restored and portable instance inputs differ")

@@ -46,7 +46,7 @@ matrix_rows/train/chicago/Cus100/part-00000.parquet
 
 | 表 | 一行代表 | 主要字段与读取方式 |
 |---|---|---|
-| instances | 一份配送任务 | `instance_id`、城市、split、日期、seed、depot、客户数、站数、车辆容量、方法版本、问题类型。车辆规则保存在 `vehicle_json`，节点及矩阵摘要用于校验。 |
+| instances | 一份配送任务 | `instance_id`、城市、split、日期、depot、客户数、站数、车辆容量、方法版本、问题类型。车辆规则保存在 `vehicle_json`，节点及矩阵摘要用于校验。 |
 | nodes | 一个求解节点 | `(instance_id, node_idx)` 唯一。保存稳定的 `location_id`、节点类型、经纬度和需求量（cm³）。时间字段以当地午夜起算的秒计，功率以 kW 计。 |
 | matrix_rows | 一个起点到所有终点 | `(instance_id, from_idx)` 唯一。每项成本是一列 `list<float64>`，列表第 j 项对应 `node_idx=j`。保留小数精度、去向与回向。 |
 

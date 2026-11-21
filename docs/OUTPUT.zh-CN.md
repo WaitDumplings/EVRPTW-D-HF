@@ -46,7 +46,7 @@ python export_output.py --out "$OUTPUT" plot "$FILE" --dest chicago-cus100.png
 | fastest_time_distance_m | 最快路径的米数 |
 | fastest_time_s | 同一条最快路径的秒数 |
 
-Parquet 文件键值元数据 `evrptwd.instance` 是 UTF-8 JSON。`schema=evrptwd_solver_instance_v1`。其中 `payload.instance` 给出 `instance_id`、车型 JSON、日型、节点数和矩阵哈希；`payload.cle` 给出城市、源 CLE 清单、共享资产及校准的 SHA-256；`payload.rules` 给出单位和求解语义。内容摘要覆盖这些信息、逻辑节点摘要和矩阵摘要。矩阵按行主序、小端 float64 求哈希，允许更换 Parquet 压缩编码或物理行顺序。
+Parquet 文件键值元数据 `evrptwd.instance` 是 UTF-8 JSON。生成机文件使用 `evrptwd_solver_instance_v1`，HF 发布文件使用 `evrptwd_solver_instance_v2`。公开版按统一字段写入实际求解数据。两版由同一读取器加载。其中 `payload.instance` 给出 `instance_id`、车型 JSON、日型、节点数和矩阵哈希；`payload.cle` 给出城市、源 CLE 清单、共享资产及校准的 SHA-256；`payload.rules` 给出单位和求解语义。内容摘要覆盖这些信息、逻辑节点摘要和矩阵摘要。矩阵按行主序、小端 float64 求哈希，允许更换 Parquet 压缩编码或物理行顺序。
 
 CVRP 使用仓库和客户的距离子矩阵。VRPTW 同时使用同路径行驶时间、服务时间、硬服务开始窗和班次。EVRPTW 加入 CS，耗电量为里程 km 乘车型系数 kWh/km，车辆到达节点含回仓时满足最低 SOC。站点按有效功率 kW 线性充满，可以复访，depot 负责出发和回仓。时间以当地午夜起的秒数计，可等待。各求解器报告的总米数使用原始 float64 距离，包含各路线首尾与仓库之间的有向路段。只支持整数的求解器记录内部缩放与取整方式，最终在原始矩阵上重算总米数。
 
@@ -74,4 +74,4 @@ python export_output.py unpack "$FILE" --problem evrptw --dest "$OUT/for-cpp"
 
 读取 `nodes.tsv`、`vehicle.json` 和 `instance.json`。JSON 中保留 CLE 版本绑定、源实例逻辑摘要以及前两个文件的字节 SHA-256，接收方可用标准 SHA-256 工具复核。后者的 `matrices` 列出每个 `.f64le` 文件的名称、形状和摘要。对 n 列矩阵，单元 (i,j) 的字节偏移为 `8*(i*n+j)`，直接按 IEEE 754 小端双精度读取。节点、工况、车辆和可用矩阵随 `--problem cvrp|vrptw|evrptw` 自动裁切；每种视图保留原 `instance_id`。
 
-收集发布文件时使用 `instances/*/*/Cus*/*.parquet`，城市目录按已发布城市名枚举。中断写入的实例暂存文件使用隐藏的 `.partial` 后缀，城市暂存目录以点开头。正式上传 Hugging Face 时，可将这些单实例文件作为 `export_instance.py --input-list` 的输入，打包成可浏览的实例索引、节点、矩阵行三张分片表。一个实例的逻辑数据在两种布局间保持相同。[HF Parquet 布局](PARQUET.zh-CN.md)
+收集发布文件时使用 `instances/*/*/Cus*/*.parquet`，城市目录按已发布城市名枚举。中断写入的实例暂存文件使用隐藏的 `.partial` 后缀，城市暂存目录以点开头。Hugging Face 首发目录由 `quota_release.py project` 和 `merge` 产生，保留一个实例文件供三种问题共用。[组织与汇总](CITY_DELIVERY.zh-CN.md)。需要三表布局的求解器也可使用 `export_instance.py` 单独导出。[三表格式](PARQUET.zh-CN.md)

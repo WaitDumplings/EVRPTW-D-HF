@@ -64,6 +64,30 @@ NODE_SCHEMA = pa.schema(
     ]
 )
 
+# Fields that describe the realized routing problem, independent of its draw.
+HF_INFO_FIELDS = (
+    "instance_id",
+    "problem_type",
+    "city",
+    "split",
+    "service_date",
+    "day_type",
+    "depot_id",
+    "customer_count",
+    "station_count",
+    "node_count",
+    "capacity_cm3",
+    "fleet_size",
+    "objective",
+    "path_policy",
+    "method_version",
+    "source_shared_sha256",
+    "vehicle_json",
+    "matrix_sha256_json",
+    "nodes_sha256",
+)
+HF_INFO_SCHEMA = pa.schema([INFO_SCHEMA.field(key) for key in HF_INFO_FIELDS])
+
 
 def json_sha256(value):
     encoded = json.dumps(
@@ -148,7 +172,10 @@ class Problem:
             )
             columns[key] = pa.ListArray.from_arrays(offsets, values)
         return {
-            "instances": pa.Table.from_pylist([self.info], schema=INFO_SCHEMA),
+            "instances": pa.Table.from_pylist(
+                [self.info],
+                schema=INFO_SCHEMA if "seed" in self.info else HF_INFO_SCHEMA,
+            ),
             "nodes": self.nodes,
             "matrix_rows": pa.table(columns),
         }

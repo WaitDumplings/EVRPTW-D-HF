@@ -61,3 +61,5 @@ python export_instance.py "$WORK/restored/chicago-instance1" --out "$WORK/parque
 ## 开发验证
 
 运行 `python -m pytest -q`。本机已有完整 Amazon 订单库时，使用 `EVRPTWD_TEST_CATALOG="$WORK/public/amazon" python -m pytest -q`，同一轮会覆盖双进程生成、恢复和重试。
+
+对已验收的城市，使用 `quota_release.py project` 在各机准备 Hugging Face 发布分片，汇总机用 `merge --accepted-shards` 对照原索引组装公开目录。每个实例提供同一组节点、车辆及路网矩阵。[分片命令和发布目录](docs/CITY_DELIVERY.zh-CN.md#4-已验收城市导出-hugging-face-分片)

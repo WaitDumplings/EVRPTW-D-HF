@@ -10,9 +10,16 @@ from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 
-from solver_parquet import MATRICES, NODE_FIELDS, decode_problem, json_sha256
+from solver_parquet import (
+    HF_INFO_FIELDS,
+    MATRICES,
+    NODE_FIELDS,
+    decode_problem,
+    json_sha256,
+)
 
 FORMAT = "evrptwd_solver_instance_v1"
+HF_FORMAT = "evrptwd_solver_instance_v2"
 FOOTER_KEY = b"evrptwd.instance"
 RULES = {
     "objective": "sum directed shortest_distance_m over all route legs, using unrounded float64 metres",
@@ -39,11 +46,20 @@ def _header(schema):
     if not meta or FOOTER_KEY not in meta:
         raise ValueError("Missing portable EVRPTW-D instance footer")
     obj = json.loads(meta[FOOTER_KEY])
-    if obj.get("schema") != FORMAT or json_sha256(obj["payload"]) != obj.get(
-        "content_sha256"
-    ):
+    if obj.get("schema") not in (FORMAT, HF_FORMAT) or json_sha256(
+        obj["payload"]
+    ) != obj.get("content_sha256"):
         raise ValueError("Unsupported or damaged portable instance header")
     task = obj["payload"]["instance"]
+    if obj["schema"] == HF_FORMAT and (
+        set(task) != set(HF_INFO_FIELDS)
+        or set(meta) != {FOOTER_KEY}
+        or set(obj) != {"schema", "content_sha256", "payload"}
+        or set(obj["payload"]) != {"instance", "cle", "rules"}
+        or obj["payload"]["rules"] != RULES
+        or schema.names != ["instance_id", *NODE_FIELDS["evrptw"], *MATRICES["evrptw"]]
+    ):
+        raise ValueError("Unexpected public solver fields")
     cle = obj["payload"]["cle"]
     if (task["city"], task["source_shared_sha256"]) != (
         cle["city"],
@@ -76,7 +92,7 @@ def read_portable(path, problem="evrptw"):
     return header, decode_problem(info, nodes, rows, problem)
 
 
-def write_instance(path, task, city_binding):
+def write_instance(path, task, city_binding, *, schema=FORMAT):
     if task.info["problem_type"] != "evrptw":
         raise ValueError(
             "Publish the complete EV task; select the solver view at read time"
@@ -88,7 +104,7 @@ def write_instance(path, task, city_binding):
         raise ValueError("Instance belongs to another city or shared CLE version")
     payload = {"instance": task.info, "cle": city_binding, "rules": RULES}
     header = {
-        "schema": FORMAT,
+        "schema": schema,
         "payload": payload,
         "content_sha256": json_sha256(payload),
     }

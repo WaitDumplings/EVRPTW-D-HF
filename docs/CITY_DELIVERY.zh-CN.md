@@ -1,6 +1,6 @@
 # EVRPTW-D 足额发布与四机交付
 
-四台生成机各自整理负责的城市，汇总机发布 11 城、17,400 个有效实例。每城一份完整 CLE，每例一个 Parquet，CVRP、VRPTW、EVRPTW 共用同一 ID。公开索引按城市、split、N 和实例 ID 排列。每例均保留实际生效的 seed、日期、depot、车辆和节点属性。数据集说明按组汇报构造拒绝情况。
+四台生成机各自整理负责的城市，汇总机发布 11 城、17,400 个有效实例。每城一份完整 CLE，每例一个 Parquet，CVRP、VRPTW、EVRPTW 共用同一 ID。公开索引按城市、split、N 和实例 ID 排列。公开实例保留日期、depot、车辆、节点及矩阵。实际抽样 seed、任务键和过程回执保存在生产输出。
 
 ## 1. 首发配额
 
@@ -29,7 +29,7 @@
 - 已认证且文件完好的实例直接交付。已有认证 ZIP 但缺 Parquet 时从原 ZIP 导出。中断、磁盘错误和文件损坏先恢复同一次执行。
 - 对确认由候选容量引起的生成失败，优先沿用原城市、split、N、CS 数、depot 和具体服务日期，按预定 seed 顺序重新调用相同生成器，接纳第一个通过相同认证的实例。客户、订单和站点照常生成。失败与地理条件可能相关，降低 R 或改抽市中心 depot 会改变抽样分布。
 - 之前已补好的样本优先核对已有证据。城市、split、N、CS 数、日型、CLE、生成方法及认证一致，且是按原尝试顺序接受的首个合格样本，即可复用。之前若按正常分层规则换过 depot 或日期，核对生成记录并汇报汇总数量。若某 depot 的可供地点总数小于 N，或可用经验 R 支持为空，则保持服务日期不变，按该城既有的分层 depot 顺序选择下一个 depot。只有所有 depot 均已证实存在这类固定容量不足时，才报该槽位在本城无法满足。
-- 记录保存在生成机。原始计划、首轮失败回执、后续尝试和新旧映射用于内部追溯。数据集卡写明“在相同构造条件下抽样至各组足额”，可按城市、规模、split 汇报拒绝数量。首轮拒绝率的分母是原计划槽位数；若另算全程拒绝率，分母是去重的实际随机抽取次数，排除执行错误和同一抽取的文件重导出。
+- 原始计划、首轮回执、后续尝试和映射保存在生成机，汇总时使用已验收索引核对成员。
 
 ## 3. 生成机本轮交付小清单
 
@@ -90,47 +90,46 @@ python quota_release.py draw --work "$WORK" --output "$OUTPUT" \
   --city "$CITY" --split train --n 500 --slot 17 --attempts 8
 ```
 
-## 4. 汇总机先收清单，后收文件
+## 4. 已验收城市导出 Hugging Face 分片
 
-约 300 GB 是预估。各机 _release/<city>/ 中只有 index.parquet、city.json 和 files.txt。先把这些小文件放到汇总机 incoming/A/_release/<city>/ 等位置，汇总机预检通过后，待项目负责人另行通知传输。各机 files.txt 的路径均相对于本机 OUTPUT。汇总机以下命令在同版本生成器仓库内执行。
-
-```bash
-python quota_release.py merge --check-only --shards incoming/A incoming/B incoming/C incoming/D
-```
-
-预检核对 11 城归属、逐格配额、CS 数、配置版本、实例 ID 和去掉 ID 后的求解输入摘要。输出中的 instance bytes 只计实例。汇总机另为 CLE、分片元数据和文件系统本身留空间。在汇总机从来源拉取时，以下示例将 SERVER_A、远端绝对路径和城市替换为实际值。
+每台机器用现有生产输出作输入。把 `OUTPUT` 设为含 `CLE/`、`instances/`、`_release/` 的绝对路径，`SHARD` 设为独立的输出目录。例中 A 负责 Chicago 和 Houston。
 
 ```bash
-rsync -aP --files-from=incoming/A/_release/chicago/files.txt \
-  SERVER_A:/absolute/path/city-v2-output/ incoming/A/
+for city in chicago houston; do
+  python quota_release.py project --output "$OUTPUT" --out "$SHARD" --city "$city" || exit 1
+done
 ```
 
-四台都完成后执行正式合并。incoming 和最终目标放在同一个支持硬链接的文件系统，选择尚不存在的输出目录。工具将认证实例和 CLE 原文件硬链接进发布目录，逐文件核对源清单 SHA-256。完成后原子发布。硬链接共享底层文件；汇总后也不要原地改写 incoming 里的文件。
+此步骤顺序读取已验收文件，把相同的节点和矩阵写入统一的 v2 Parquet。源机核对原文件 SHA-256、求解输入指纹，以及公开文件回读后的节点和四张矩阵摘要。实例 ID、地点顺序、订单属性、车辆、日期、depot 和 CLE 绑定保持一致。原始 seed 与任务键保存在生产输出。重新执行同一命令会核对并复用已经写好的实例。每城完成后，`$SHARD/_release/<city>/` 下产生 `index.parquet`、`city.json`、`files.txt`。其中源索引指纹用于在汇总机比对已验收清单。
+
+为公开实例预留一份额外磁盘空间。每城的 CLE 和来源文件在同一文件系统使用硬链接，跨文件系统会复制。复制完成前保留源文件和分片。共享硬链接的文件按只读数据使用。
+
+## 5. 在 A 汇总发布
+
+四台生成机分别整理公开分片 A、B、C、D。由负责人将 B、C、D 搬到 A，按每城 `files.txt` 中的相对路径保留目录结构。A 的本地分片直接作为输入。将**上次已验收的四份原始小清单**单独解包到 `$ACCEPTED/{A,B,C,D}/_release/<city>/`。源清单与本轮新分片分别使用独立目录。
 
 ```bash
-python quota_release.py merge --shards incoming/A incoming/B incoming/C incoming/D \
-  --out /same-filesystem/EVRPTW-D-release
+# Bash；A、B、C、D 是汇总机上各个公开分片的实际绝对路径
+shards=("$A" "$B" "$C" "$D")
+accepted=("$ACCEPTED/A" "$ACCEPTED/B" "$ACCEPTED/C" "$ACCEPTED/D")
+python quota_release.py merge --shards "${shards[@]}" --accepted-shards "${accepted[@]}" --check-only
+python quota_release.py merge --shards "${shards[@]}" --accepted-shards "${accepted[@]}" --out "$RELEASE_DIR"
 ```
 
-## 5. 最终交给 Hugging Face 和求解器的内容
+预检将每例 ID、求解输入指纹、split、规模、CS 数及生成参数与原清单比对，检查各格配额与全局唯一性。正式合并核对到盘文件的 SHA-256，完成后原子创建 `RELEASE_DIR`。选择尚不存在的目标目录，与分片同盘可通过硬链接节省空间。仅将以下最终目录作为 Hugging Face dataset 根目录。
 
 ```text
 EVRPTW-D-release/
-  README.md
-  NOTICE.md、docs/SOURCES.zh-CN.md                  # 数据来源与署名
-  release.json                                      # 版本、各城 CLE 指纹、首轮容量拒绝聚合计数
-  index.parquet                                     # 17,400 行，每个正式实例一行
-  config/                                           # 实际生成配置，同一版本一份
-    vehicle.json                                    # 车型、容量、能耗、SOC、充电与班次
-    customer_profile.json                           # 客户概率、组数、道路准入、经验 R 来源
-    candidate_ratio.csv                             # R 的经验分布
-    order_profile.json                              # 订单与服务设置
-    …                                               # 生产版本的其余配置
-  parameters/cities/<city>/                         # 本城数据来源与住宅参数校准
-  CLE/<city>/                                       # 完整 Stage 1，含道路、地点及 shared/
+  README.md                    # HF 默认配置 instances，catalog 中每行一个实例
+  NOTICE.md
+  docs/SOURCES.zh-CN.md
+  release.json                 # 生成方法、公开格式、配置摘要、各城 CLE 绑定
+  index.parquet                # 17,400 行，按 city、split、n、instance_id 排序
+  config/vehicle.json          # 车型、容量、能耗、SOC、充电与班次
+  config/                      # 客户、订单和其他生成参数
+  parameters/cities/<city>/    # 城市来源与住宅参数
+  CLE/<city>/                  # 完整 Stage 1，含 shared/
   instances/<city>/<split>/Cus<N>/<instance_id>.parquet
 ```
 
-公开索引含实际日期、depot、seed、p、K_seed、K_geo、抽到的 R、M_target、实际 M、tract 数、站数、相对路径和文件摘要。每个实例本身带有节点（含需求、服务时间、时间窗、有效充电功率）、车辆 JSON 和四张有向路网矩阵。每个公开实例使用相同字段和目录。公开索引没有首轮/补样列。原 Parquet 保留真实生成信息；有不同 seed 不等于应改写它。
-
-merge 成功后只发布 EVRPTW-D-release/。生成机的逐槽台账以及传输用的 incoming/ 各自保留。若迁移机器有独立归档需求，可单独备份紧凑 ZIP 和台账。
+使用者从索引的 `path` 定位实例，按 `city`、`split`、`n` 筛选。索引保留服务日期、depot、p、起始组数 K_seed、实际组数 K_geo、R、M_target、M、tract 数以及内容与文件指纹。K_seed 统计空间组数。每个 Parquet 包含节点、需求、服务时长、时间窗、有效充电功率、车辆和四张矩阵，可独立读出三个求解视图。

@@ -13,7 +13,13 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from solver_parquet import PROBLEMS, from_restored, load_problem, partition
+from solver_parquet import (
+    HF_INFO_FIELDS,
+    PROBLEMS,
+    from_restored,
+    load_problem,
+    partition,
+)
 from stage2.common import public_split, read
 
 
@@ -40,7 +46,7 @@ def write_card(root, splits, problem):
         "Each `matrix_rows` row starts at `from_idx`; list index is the destination node.",
         "Road distances are metres and times are seconds. Loads are cubic centimetres.",
         "The default path minimizes directed road distance. A null fleet size means unlimited vehicles.",
-        "A null source split is shown under `example`. The source protocol status describes the EV witness.",
+        "A null source split is shown under `example`.",
         "",
         "Roads use © OpenStreetMap contributors. Footprints are from Microsoft, structure attributes from USACE NSI,",
         "boundaries from the U.S. Census Bureau and charging facilities from AFDC.",
@@ -138,7 +144,10 @@ def write_dataset(records, out, problem, shard_bytes=256 << 20):
                     stack.callback(writers[name].close)
                 for info, load in group:
                     view = load().view(problem)
-                    view = replace(view, info=release_info(view.info))
+                    view = replace(
+                        view,
+                        info=release_info({k: view.info[k] for k in HF_INFO_FIELDS}),
+                    )
                     if (
                         view.info["instance_id"] != info["instance_id"]
                         or partition(view.info) != folder

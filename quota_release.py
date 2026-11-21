@@ -1,6 +1,7 @@
 """Assemble a quota-complete public release from certified city instances."""
 
 import argparse
+import errno
 import itertools
 import json
 import os
@@ -8,13 +9,21 @@ import shutil
 import tempfile
 import zipfile
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
 
 from export_output import city_inventory, verify_published_archive
-from instance_file import RULES, file_header
-from solver_parquet import source_nodes_and_info
+from instance_file import (
+    FORMAT,
+    HF_FORMAT,
+    RULES,
+    file_header,
+    read_portable,
+    write_instance,
+)
+from solver_parquet import HF_INFO_FIELDS, source_nodes_and_info
 from stage2.common import (
     BUDGET,
     CITIES,
@@ -43,7 +52,7 @@ CAPACITY = FIXED_DEPOT_CAPACITY | {
     "insufficient_tracts_for_seed_count",
 }
 META = "_release"
-PUBLIC_COLUMNS = (
+SEALED_COLUMNS = (
     "city",
     "split",
     "n",
@@ -65,6 +74,38 @@ PUBLIC_COLUMNS = (
     "tract_count",
     "content_sha256",
     "solver_input_sha256",
+)
+HF_COLUMNS = (
+    "city",
+    "split",
+    "n",
+    "cs_budget",
+    "instance_id",
+    "path",
+    "bytes",
+    "sha256",
+    "service_date",
+    "day_type",
+    "depot_id",
+    "p",
+    "K_seed",
+    "K_geo",
+    "R",
+    "M_target",
+    "M",
+    "tract_count",
+    "content_sha256",
+    "solver_input_sha256",
+)
+HF_CONFIG = (
+    "amazon_solver_fields.json",
+    "candidate_ratio.csv",
+    "customer_profile.json",
+    "manifest.json",
+    "order_profile.json",
+    "public_sources.json",
+    "stage1_method.json",
+    "vehicle.json",
 )
 
 
@@ -88,6 +129,18 @@ def quotas(city):
 
 def config_hashes():
     return {p.name: sha(p) for p in CONFIG.iterdir() if p.is_file()}
+
+
+def solver_input_hash(nodes, info):
+    return digest(
+        [
+            nodes.drop(["instance_id"]).to_pylist(),
+            info["matrix_sha256_json"],
+            info["vehicle_json"],
+            info["path_policy"],
+            info["objective"],
+        ]
+    )
 
 
 def describe(archive, portable, receipt, binding, expected_vehicle):
@@ -134,15 +187,7 @@ def describe(archive, portable, receipt, binding, expected_vehicle):
         cs_budget=info["station_count"],
         bytes=portable.stat().st_size,
         content_sha256=header["content_sha256"],
-        solver_input_sha256=digest(
-            [
-                nodes.drop(["instance_id"]).to_pylist(),
-                info["matrix_sha256_json"],
-                info["vehicle_json"],
-                info["path_policy"],
-                info["objective"],
-            ]
-        ),
+        solver_input_sha256=solver_input_hash(nodes, info),
         **{k: activation[k] for k in ("p", "K_seed", "K_geo", "R", "M_target")},
         M=footprint["M"],
         tract_count=footprint["T"],
@@ -150,8 +195,8 @@ def describe(archive, portable, receipt, binding, expected_vehicle):
     return row, instance
 
 
-def validate_rows(city, df):
-    require(tuple(df.columns) == PUBLIC_COLUMNS, f"Wrong index schema: {city}")
+def validate_rows(city, df, columns=SEALED_COLUMNS):
+    require(tuple(df.columns) == columns, f"Wrong index schema: {city}")
     require(
         df.groupby(["split", "n"]).size().to_dict() == quotas(city),
         f"Wrong quotas: {city}",
@@ -328,7 +373,9 @@ def read_city_index(folder, city):
         f"Changed manifest: {city}",
     )
     df = pd.read_parquet(index)
-    validate_rows(city, df)
+    schema = meta.get("instance_schema", FORMAT)
+    require(schema in (FORMAT, HF_FORMAT), f"Unknown shard format: {schema}")
+    validate_rows(city, df, HF_COLUMNS if schema == HF_FORMAT else SEALED_COLUMNS)
     return meta, df
 
 
@@ -555,7 +602,7 @@ def seal_city(city, output, work, choices, fill_capacity):
             require(row["sha256"] == initial.sha256, f"Original Parquet changed: {rel}")
         rows.append(row)
     require(not overrides, f"Unexpected choices: {list(overrides)}")
-    df = pd.DataFrame(rows, columns=PUBLIC_COLUMNS).sort_values(
+    df = pd.DataFrame(rows, columns=SEALED_COLUMNS).sort_values(
         ["split", "n", "instance_id"]
     )
     validate_rows(city, df)
@@ -611,9 +658,173 @@ def seal_city(city, output, work, choices, fill_capacity):
         )
 
 
-def merge(args):
+def install_asset(source, target, expected):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        try:
+            os.link(source, target)
+        except OSError as exc:
+            if exc.errno != errno.EXDEV:
+                raise
+            with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
+                copy = Path(tmp) / "asset"
+                shutil.copyfile(source, copy)
+                require(sha(copy) == expected, f"Checksum mismatch: {source}")
+                os.link(copy, target)
+            return
+    require(sha(target) == expected, f"Checksum mismatch: {target}")
+
+
+def project_instance(source, target, row, binding):
+    require(sha(source) == row.sha256, f"Checksum mismatch: {source}")
+    header, task = read_portable(source)
+    require(
+        header["schema"] == FORMAT
+        and header["content_sha256"] == row.content_sha256
+        and header["payload"]["cle"] == binding
+        and header["payload"]["rules"] == RULES
+        and task.info["instance_id"] == row.instance_id,
+        f"Sealed instance mismatch: {source}",
+    )
+    info = {key: task.info[key] for key in HF_INFO_FIELDS}
+    require(
+        solver_input_hash(task.nodes, info) == row.solver_input_sha256,
+        f"Solver input mismatch: {source}",
+    )
+    write_instance(target, replace(task, info=info), binding, schema=HF_FORMAT)
+    # The reader recomputes the ordered node digest and all four matrix digests.
+    published, _ = read_portable(target)
+    require(
+        published["schema"] == HF_FORMAT
+        and published["payload"] == {"instance": info, "cle": binding, "rules": RULES},
+        f"Published instance differs: {target}",
+    )
+    return target.stat().st_size, sha(target), published["content_sha256"]
+
+
+def city_assets(source, city, meta):
+    base = source / "CLE" / city
+    binding, inventory = city_inventory(base, base / "shared", city)
+    files = {f"CLE/{city}/{p}": value[1] for p, value in inventory.items()}
+    for name in PROVENANCE:
+        path = f"reports/{city}/provenance/{name}"
+        files[path] = meta["files"][path]
+    require(
+        binding == meta["binding"] and files == meta["files"],
+        f"Different city assets: {city}",
+    )
+    return files
+
+
+def write_hf_city(source, dest, city, meta, df, *, final):
+    for path, expected in city_assets(source, city, meta).items():
+        rel = Path(path)
+        if final and rel.parts[0] == "reports":
+            rel = Path("parameters/cities") / city / rel.name
+        install_asset(source / path, dest / rel, expected)
+
+    result = df.loc[:, HF_COLUMNS].copy()
+    projected = meta.get("instance_schema") == HF_FORMAT
+    for row in df.itertuples():
+        src, target = source / row.path, dest / row.path
+        if projected:
+            install_asset(src, target, row.sha256)
+            head, task = read_portable(target)
+            info = task.info
+            require(
+                head["schema"] == HF_FORMAT
+                and head["content_sha256"] == row.content_sha256
+                and head["payload"]["cle"] == meta["binding"]
+                and all(
+                    info[k] == getattr(row, k)
+                    for k in (
+                        "instance_id",
+                        "city",
+                        "split",
+                        "day_type",
+                        "service_date",
+                        "depot_id",
+                    )
+                )
+                and info["customer_count"] == row.n
+                and info["station_count"] == row.cs_budget
+                and solver_input_hash(task.nodes, info) == row.solver_input_sha256
+                and target.stat().st_size == row.bytes,
+                f"Wrong public instance: {target}",
+            )
+        else:
+            result.loc[row.Index, ["bytes", "sha256", "content_sha256"]] = (
+                project_instance(src, target, row, meta["binding"])
+            )
+    return result.sort_values(["split", "n", "instance_id"]).reset_index(drop=True)
+
+
+def project(args):
+    source, dest, city = args.output.resolve(), args.out.resolve(), args.city
+    require(
+        source != dest
+        and not dest.is_relative_to(source)
+        and not source.is_relative_to(dest),
+        "Choose a separate public shard root",
+    )
+    folder = source / META / city
+    meta, df = read_city_index(folder, city)
+    require(
+        meta.get("instance_schema", FORMAT) == FORMAT, "Expected a sealed source city"
+    )
+    require(
+        meta["contract"]["resource_sha256"] == config_hashes(),
+        "Different generation config",
+    )
+    with lock(dest / ".locks" / f"{city}.lock"):
+        target = dest / META / city
+        if target.exists():
+            previous, _ = read_city_index(target, city)
+            require(
+                previous.get("sealed_index_sha256") == meta["index_sha256"],
+                f"Different sealed source for existing shard: {city}",
+            )
+        frame = write_hf_city(source, dest, city, meta, df, final=False)
+        validate_rows(city, frame, HF_COLUMNS)
+        parent = target.parent
+        parent.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=parent) as tmp:
+            ready = Path(tmp) / city
+            ready.mkdir()
+            frame.to_parquet(ready / "index.parquet", index=False)
+            transfer = {k: meta[k] for k in ("city", "files", "binding", "contract")}
+            transfer.update(
+                instance_schema=HF_FORMAT,
+                sealed_index_sha256=meta["index_sha256"],
+                index_sha256=sha(ready / "index.parquet"),
+            )
+            write(ready / "city.json", transfer)
+            paths = sorted(
+                [
+                    *meta["files"],
+                    *frame.path,
+                    f"{META}/{city}/index.parquet",
+                    f"{META}/{city}/city.json",
+                ]
+            )
+            (ready / "files.txt").write_text("\n".join(paths) + "\n")
+            if target.exists():
+                require(
+                    previous == transfer
+                    and (target / "files.txt").read_bytes()
+                    == (ready / "files.txt").read_bytes(),
+                    f"Changed public shard: {city}",
+                )
+            else:
+                ready.rename(target)
+    print(
+        f"{city}: {len(frame)} public instances; transfer list {target / 'files.txt'}"
+    )
+
+
+def city_catalogs(shards):
     catalogs = {}
-    for root in args.shards:
+    for root in shards:
         for p in (root / META).glob("*/city.json"):
             city = p.parent.name
             require(
@@ -625,6 +836,36 @@ def merge(args):
     require(
         set(catalogs) == set(CITIES), f"Missing cities: {set(CITIES) - catalogs.keys()}"
     )
+    return catalogs
+
+
+def merge(args):
+    catalogs = city_catalogs(args.shards)
+    accepted_roots = getattr(args, "accepted_shards", None)
+    if not args.check_only and any(
+        m.get("instance_schema") == HF_FORMAT for _, m, _ in catalogs.values()
+    ):
+        require(accepted_roots, "Supply --accepted-shards for the final public merge")
+    if accepted_roots:
+        accepted = city_catalogs(accepted_roots)
+        stable = [
+            k for k in HF_COLUMNS if k not in ("bytes", "sha256", "content_sha256")
+        ]
+        for city, (_, meta, df) in catalogs.items():
+            _, original, old = accepted[city]
+            require(
+                meta.get("instance_schema") == HF_FORMAT
+                and original.get("instance_schema", FORMAT) == FORMAT
+                and meta["sealed_index_sha256"] == original["index_sha256"]
+                and all(
+                    meta[k] == original[k] for k in ("contract", "binding", "files")
+                )
+                and df[stable]
+                .set_index("instance_id")
+                .sort_index()
+                .equals(old[stable].set_index("instance_id").sort_index()),
+                f"Public shard differs from accepted panel: {city}",
+            )
     data = pd.concat([catalogs[city][2] for city in CITIES], ignore_index=True)
     require(
         len(data) == sum(sum(quotas(city).values()) for city in CITIES)
@@ -655,49 +896,16 @@ def merge(args):
     with tempfile.TemporaryDirectory(dir=dest.parent, prefix=".quota-") as tmp:
         stage = Path(tmp) / "data"
         stage.mkdir()
-        for city, (root, meta, df) in catalogs.items():
-            files = dict(meta["files"])
-            files.update(zip(df.path, df.sha256))
-            for path, expected in files.items():
-                rel = Path(path)
-                require(
-                    not rel.is_absolute()
-                    and ".." not in rel.parts
-                    and (
-                        rel.parts[:2] in {("CLE", city), ("instances", city)}
-                        or (
-                            rel.parts[:3] == ("reports", city, "provenance")
-                            and rel.name in PROVENANCE
-                            and len(rel.parts) == 4
-                        )
-                    ),
-                    f"Unexpected asset: {path}",
-                )
-                output_rel = (
-                    Path("parameters/cities") / city / rel.name
-                    if rel.parts[0] == "reports"
-                    else rel
-                )
-                target = stage / output_rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                os.link(root / rel, target)
-                require(sha(target) == expected, f"Checksum mismatch: {path}")
-            binding, inventory = city_inventory(
-                stage / "CLE" / city, stage / "CLE" / city / "shared", city
-            )
-            required = {
-                f"CLE/{city}/{p.as_posix()}": v[1] for p, v in inventory.items()
-            }
-            require(
-                binding == meta["binding"]
-                and all(meta["files"].get(k) == v for k, v in required.items())
-                and all(
-                    f"reports/{city}/provenance/{f}" in meta["files"]
-                    for f in PROVENANCE
-                ),
-                f"Missing city assets: {city}",
-            )
-        shutil.copytree(CONFIG, stage / "config")
+        frames = [
+            write_hf_city(root, stage, city, meta, df, final=True)
+            for city, (root, meta, df) in catalogs.items()
+        ]
+        data = pd.concat(frames, ignore_index=True).sort_values(
+            ["city", "split", "n", "instance_id"], ignore_index=True
+        )
+        (stage / "config").mkdir()
+        for name in HF_CONFIG:
+            shutil.copyfile(CONFIG / name, stage / "config" / name)
         shutil.copyfile(PROJECT / "NOTICE.md", stage / "NOTICE.md")
         (stage / "docs").mkdir()
         shutil.copyfile(
@@ -708,22 +916,33 @@ def merge(args):
             stage / "release.json",
             {
                 "instances": len(data),
-                "original_capacity_rejections": {
-                    c: m["original_capacity_rejections"]
-                    for c, (_, m, _) in catalogs.items()
+                "instance_schema": HF_FORMAT,
+                "contract": {
+                    k: v
+                    for k, v in next(iter(catalogs.values()))[1]["contract"].items()
+                    if k
+                    in (
+                        "version",
+                        "code_sha256",
+                        "stage1_engine_sha256",
+                        "calendar_start",
+                        "calendar_days",
+                    )
                 },
-                "contract": next(iter(catalogs.values()))[1]["contract"],
+                "config_sha256": {
+                    name: sha(stage / "config" / name) for name in HF_CONFIG
+                },
                 "cities": {c: m["binding"] for c, (_, m, _) in catalogs.items()},
                 "index_sha256": sha(stage / "index.parquet"),
             },
         )
         (stage / "README.md").write_text(
-            "---\nconfigs:\n- config_name: instances\n  data_files:\n  - split: all\n    path: index.parquet\n---\n"
+            "---\nconfigs:\n- config_name: instances\n  data_files:\n  - split: catalog\n    path: index.parquet\n---\n"
             f"# EVRPTW-D\n\n{len(data):,} accepted tasks in {len(catalogs)} cities. Filter index.parquet by city, split and n. "
-            "Each instance file supports CVRP, VRPTW and EVRPTW. Construction samples must pass the same "
-            "generation and certification criteria. Capacity rejections are resampled within the quota cell. "
-            "An insufficient reachable candidate count is a construction rejection. Falling short of R times n alone is allowed when the footprint supports n customers. See release.json for first-draw rejection counts. "
-            "R is the drawn candidate-to-customer ratio; M is the realized candidate count. "
+            "Each instance file provides the same depot, customers and realized demands for the CVRP, VRPTW and EVRPTW views. "
+            "Download the file in the index row's `path`. It contains ordered nodes, vehicle settings and four directed road matrices. "
+            "Instances are sampled subject to customer availability and a common construction protocol. "
+            "R is the target candidate-to-customer ratio. M is the realized candidate count. "
             "Vehicle and generator profiles are in config/, and city calibrations in parameters/cities/. "
             "See the [generator and data credits](https://github.com/WaitDumplings/EVRPTW-D-HF).\n"
         )
@@ -753,12 +972,24 @@ if __name__ == "__main__":
         required=True,
         help="Last attempt number in deterministic order",
     )
+    p = subs.add_parser("project", help="Prepare one accepted city for Hugging Face")
+    p.add_argument(
+        "--output", type=Path, required=True, help="Existing sealed production root"
+    )
+    p.add_argument("--out", type=Path, required=True, help="Separate public shard root")
+    p.add_argument("--city", choices=CITIES, required=True)
     p = subs.add_parser("merge")
     p.add_argument("--shards", nargs="+", type=Path, required=True)
+    p.add_argument(
+        "--accepted-shards",
+        nargs="+",
+        type=Path,
+        help="Cross-check public shards against accepted v1 manifest roots",
+    )
     p.add_argument("--out", type=Path)
     p.add_argument("--check-only", action="store_true")
     args = parser.parse_args()
     if args.command in {"fill", "seal"}:
         seal(args, fill_capacity=args.command == "fill")
     else:
-        {"merge": merge, "draw": draw}[args.command](args)
+        {"merge": merge, "draw": draw, "project": project}[args.command](args)

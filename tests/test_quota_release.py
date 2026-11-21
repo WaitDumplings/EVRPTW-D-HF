@@ -1,6 +1,7 @@
 """Exercise first-draw and replacement routing through a miniature city release."""
 
 import os
+import shutil
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,8 +13,8 @@ from test_solver_parquet import example
 import export_output
 import quota_release as qr
 import stage2.batch
-from instance_file import write_instance
-from solver_parquet import from_restored
+from instance_file import HF_FORMAT, file_header, read_portable, write_instance
+from solver_parquet import HF_INFO_FIELDS, PROBLEMS, from_restored
 from stage2.common import digest, read, sha, shared_identity, write
 
 
@@ -271,17 +272,90 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     df = pd.read_parquet(dest / "index.parquet")
     assert set(df.instance_id) == {rows[0]["instance_id"], supplemental_id}
     assert len(df) == 2 and all(not ("slot" in c or "retry" in c) for c in df.columns)
-    assert (
-        read(dest / "release.json")["original_capacity_rejections"]["chicago"][0][
-            "count"
-        ]
-        == 1
+    assert "seed" not in df and "original_capacity_rejections" not in read(
+        dest / "release.json"
     )
     assert (dest / "config/vehicle.json").is_file() and not (
-        dest / "slots.parquet"
+        dest / "config/release_panel.json"
     ).exists()
-    for path in df.path:
-        assert os.stat(output / path).st_ino == os.stat(dest / path).st_ino
+    assert not (dest / "_release").exists() and not (dest / "slots.parquet").exists()
+    assert "rejection" not in (dest / "README.md").read_text().lower()
+    private, old = qr.read_city_index(output / "_release" / city, city)
+    assert (
+        private["original_capacity_rejections"][0]["count"] == 1
+        and old.seed.nunique() == 2
+    )
+    shard = tmp_path / "public-shard"
+    projection = SimpleNamespace(city=city, output=output, out=shard)
+    qr.project(projection)
+    qr.project(projection)  # same verified files and index on resume
+    shmeta, shrows = qr.read_city_index(shard / "_release" / city, city)
+    assert shmeta["sealed_index_sha256"] == private["index_sha256"]
+    pd.testing.assert_frame_equal(df, shrows)
+    accepted = tmp_path / "accepted-manifests"
+    for name in ("city.json", "index.parquet"):
+        dst = accepted / "_release" / city / name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(output / "_release" / city / name, dst)
+    assembled = tmp_path / "from-public"
+    with pytest.raises(ValueError, match="Supply --accepted-shards"):
+        qr.merge(SimpleNamespace(shards=[shard], check_only=False, out=assembled))
+    qr.merge(
+        SimpleNamespace(
+            shards=[shard], accepted_shards=[accepted], check_only=False, out=assembled
+        )
+    )
+    # City and method artifacts in the public root contain no Stage 2 draw records.
+    private_fields = (
+        "original_capacity_rejections",
+        "root_seed",
+        "task_key_json",
+        "source_protocol_status",
+        "changed_depot_or_date",
+        "quota-draws",
+        "supplements/",
+        "plan_sha256",
+        "release_panel.json",
+    )
+    for public_file in assembled.rglob("*"):
+        if public_file.suffix in {".json", ".md", ".csv"}:
+            public_text = public_file.read_text()
+            assert not any(k in public_text for k in private_fields), public_file
+    with pytest.raises(ValueError, match="Invalid instance path"):
+        qr.validate_rows(
+            city,
+            shrows.assign(path=["../unexpected", shrows.path.iloc[1]]),
+            qr.HF_COLUMNS,
+        )
+    pd.testing.assert_frame_equal(df, pd.read_parquet(assembled / "index.parquet"))
+    for row in df.itertuples():
+        path = row.path
+        public = file_header(dest / path)
+        assert public["schema"] == HF_FORMAT
+        assert set(public["payload"]["instance"]) == set(HF_INFO_FIELDS)
+        assert row.sha256 == sha(dest / path) == sha(shard / path)
+        assert row.content_sha256 == public["content_sha256"]
+        assert os.stat(shard / path).st_ino == os.stat(assembled / path).st_ino
+        for view in PROBLEMS:
+            _, before = read_portable(output / path, view)
+            _, after = read_portable(dest / path, view)
+            assert before.nodes.equals(after.nodes)
+            assert after.info == {k: before.info[k] for k in HF_INFO_FIELDS}
+            assert set(after.tables()["instances"].column_names) == set(HF_INFO_FIELDS)
+            for key in before.matrices:
+                assert before.matrices[key].tobytes() == after.matrices[key].tobytes()
+    # Linking public shards back to the accepted panel also checks every stable field.
+    changed = shrows.copy()
+    changed.loc[0, "R"] += 1
+    folder = shard / "_release" / city
+    changed.to_parquet(folder / "index.parquet", index=False)
+    write(
+        folder / "city.json", dict(shmeta, index_sha256=sha(folder / "index.parquet"))
+    )
+    with pytest.raises(ValueError, match="differs from accepted panel"):
+        qr.merge(
+            SimpleNamespace(shards=[shard], accepted_shards=[output], check_only=True)
+        )
     # A changed transfer must not leave a seemingly complete release.
     (output / df.path.iloc[0]).write_bytes(b"broken")
     merge.out = tmp_path / "bad-release"
