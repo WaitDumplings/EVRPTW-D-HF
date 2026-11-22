@@ -35,7 +35,7 @@ Each level keeps everything from the level before it. All three minimize total r
 
 ## How the data was built
 
-Each city environment starts from the OpenStreetMap road network, turned into a directed graph with weekday and weekend travel speeds. Candidate customer locations come from building footprints and structure records, depots from mapped logistics facilities, and charging stations from the public AFDC station list.
+Each city environment starts from the OpenStreetMap road network, turned into a directed graph with weekday and weekend travel speeds. Candidate customer locations are representative points of building footprints, with structure records used to identify residential buildings and unit counts. Depot candidates are facilities tagged as warehouses or logistics offices in OpenStreetMap. Charging stations come from the public AFDC station and equipment lists, filtered for access and vehicle compatibility.
 
 An instance fixes a city, a service date and a depot, then samples customers from the candidate locations around it and selects charging stations. Demands, service times and time windows follow an order model built on the Amazon Last Mile Routing Research Challenge dataset. Travel distances and times between all nodes are computed on the frozen road network. Instances are sampled subject to customer availability and a common construction protocol.
 
@@ -101,9 +101,9 @@ vehicle = json.loads(meta["instance"]["vehicle_json"])
 | `p` | Modeled probability that a household has a delivery on the service date. |
 | `K_seed` | Number of starting census tracts sampled for the service footprint. |
 | `K_geo` | Number of connected components among the selected census tracts. |
-| `R` | target candidate-to-customer ratio |
+| `R` | Target candidate-to-customer ratio. |
 | `M_target` | Target candidate count, equal to n multiplied by R. |
-| `M` | realized candidate count |
+| `M` | Realized candidate count. |
 | `tract_count` | Number of census tracts in the selected service footprint. |
 | `content_sha256` | SHA-256 checksum of instance metadata, city binding and solving rules. |
 | `solver_input_sha256` | SHA-256 checksum covering node attributes, matrix checksums, vehicle settings, path policy and objective. |

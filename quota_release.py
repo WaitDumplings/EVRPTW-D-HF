@@ -735,7 +735,7 @@ def install_city_environment(source, dest, city, meta):
         src = source / path
         if path == road_source:
             road = city_dir / ROAD_FILE
-            export_public_roads(src, road, expected)
+            names_cleared = export_public_roads(src, road, expected)
             records[ROAD_FILE] = {
                 "path": road.relative_to(dest).as_posix(),
                 "bytes": road.stat().st_size,
@@ -748,7 +748,7 @@ def install_city_environment(source, dest, city, meta):
             records[name] = {"bytes": target.stat().st_size, "sha256": expected}
         else:
             require(sha(src) == expected, f"Checksum mismatch: {src}")
-    return records
+    return records, names_cleared
 
 
 def write_hf_instances(source, dest, meta, df):
@@ -981,13 +981,18 @@ def merge(args):
         "Supply --reference-index to preserve the public index bytes",
     )
     dest = args.out.resolve()
+    delivery = dest.parent / "delivery"
+    require(delivery != dest, "Choose a release directory distinct from delivery")
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=dest.parent, prefix=".quota-") as tmp:
         stage = Path(tmp) / "data"
         stage.mkdir()
         city_files = {}
+        names_cleared = {}
         for city, (root, meta, df) in catalogs.items():
-            city_files[city] = install_city_environment(root, stage, city, meta)
+            city_files[city], names_cleared[city] = install_city_environment(
+                root, stage, city, meta
+            )
             write_hf_instances(root, stage, meta, df)
         index_path = stage / "index.parquet"
         shutil.copyfile(reference, index_path)
@@ -1011,7 +1016,20 @@ def merge(args):
         for city in catalogs:
             verify_public_city(stage, city)
         verify_release_paths(stage, catalogs, data.path)
+        delivery.mkdir(exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=delivery,
+            prefix=f"{dest.name}-road-names-",
+            suffix=".tsv",
+            delete=False,
+        ) as log:
+            log.write("city\tname_rows_cleared\n")
+            for city, count in sorted(names_cleared.items()):
+                log.write(f"{city}\t{count}\n")
         stage.rename(dest)
+        print(f"Internal road name counts: {log.name}")
     print(dest)
 
 

@@ -118,7 +118,7 @@ python quota_release.py merge --shards "${shards[@]}" --accepted-shards "${accep
 python quota_release.py merge --shards "${shards[@]}" --accepted-shards "${accepted[@]}" --reference-index "$index" --out "$RELEASE_DIR"
 ```
 
-预检将每例 ID、求解输入指纹、split、规模、CS 数及生成参数与原清单比对，检查各格配额与全局唯一性。参考索引须与全部公开分片的行、列和排序一致，正式合并逐字节保留该索引和 v2 实例。正式合并核对完整输入资产及输出文件的 SHA-256，完成后原子创建 `RELEASE_DIR`。选择尚不存在的目标目录，与分片同盘可通过硬链接节省空间。发布顶层的 README.md、LICENSE.md 和 NOTICE.md 均从仓库的 `dataset_card/` 目录逐字节复制。仅将以下最终目录作为 Hugging Face dataset 根目录。
+预检将每例 ID、求解输入指纹、split、规模、CS 数及生成参数与原清单比对，检查各格配额与全局唯一性。参考索引须与全部公开分片的行、列和排序一致，正式合并逐字节保留该索引和 v2 实例。正式合并核对完整输入资产及输出文件的 SHA-256，完成后原子创建 `RELEASE_DIR`。道路名称中的联系方式置空，同级 `delivery/` 内的 TSV 按城市记录置空行数。道路标识、节点序列或 highway 含联系方式时导出失败。选择尚不存在的目标目录，与分片同盘可通过硬链接节省空间。发布顶层的 README.md、LICENSE.md 和 NOTICE.md 均从仓库的 `dataset_card/` 目录逐字节复制。仅将以下最终目录作为 Hugging Face dataset 根目录。
 
 ```text
 EVRPTW-D-release/

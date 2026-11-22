@@ -22,6 +22,10 @@ _CONTACT_PATTERN = (
 )
 
 
+def _contact_matches(values):
+    return pc.match_substring_regex(values, _CONTACT_PATTERN, ignore_case=True)
+
+
 def _geometry_metadata(schema):
     source = json.loads((schema.metadata or {})[b"geo"])
     geometry = source["columns"]["geometry"]
@@ -39,7 +43,7 @@ def _geometry_metadata(schema):
 
 
 def export_public_roads(source, target, expected_sha256):
-    """Project a verified OSM way file into a new, deterministic GeoParquet."""
+    """Export a verified OSM way file and return the number of names set to null."""
     target = Path(target)
     with Path(source).open("rb") as stream:
         before = os.fstat(stream.fileno())
@@ -62,9 +66,10 @@ def export_public_roads(source, target, expected_sha256):
                 ) as writer:
                     writer.add_key_value_metadata(metadata)
                     column_counts = dict.fromkeys(
-                        ("osmid", "node_ids_json", "highway", "name"), 0
+                        ("osmid", "node_ids_json", "highway"), 0
                     )
                     matched_rows = 0
+                    redacted_names = 0
                     for batch in roads.iter_batches(
                         batch_size=32_768,
                         columns=[*keep, "tags_json"],
@@ -77,13 +82,14 @@ def export_public_roads(source, target, expected_sha256):
                             names.append(tags.get("name"))
                         fields = [batch.column(name) for name in keep]
                         fields.append(pa.array(highways, pa.string()))
-                        fields.append(pa.array(names, pa.string()))
+                        names = pa.array(names, pa.string())
+                        name_hits = _contact_matches(names)
+                        redacted_names += pc.sum(name_hits).as_py() or 0
+                        fields.append(pc.if_else(name_hits, None, names))
                         public = pa.RecordBatch.from_arrays(fields, schema=schema)
                         row_matches = pa.scalar(False)
                         for name in column_counts:
-                            hits = pc.match_substring_regex(
-                                public.column(name), _CONTACT_PATTERN, ignore_case=True
-                            )
+                            hits = _contact_matches(public.column(name))
                             column_counts[name] += pc.sum(hits).as_py() or 0
                             row_matches = pc.or_kleene(row_matches, hits)
                         matched_rows += pc.sum(row_matches).as_py() or 0
@@ -105,3 +111,4 @@ def export_public_roads(source, target, expected_sha256):
                 ):
                     raise ValueError(f"Road source changed during export: {source}")
                 os.link(pending, target)
+                return redacted_names

@@ -55,7 +55,7 @@ def test_geometry_export(road_inputs, tmp_path):
     source, _ = road_inputs
     target = tmp_path / "roads" / source.name
     digest = sha(source)
-    export_public_roads(source, target, digest)
+    assert export_public_roads(source, target, digest) == 0
     second = tmp_path / "repeat.parquet"
     export_public_roads(source, second, digest)
     assert target.read_bytes() == second.read_bytes()
@@ -102,15 +102,9 @@ def test_geometry_export(road_inputs, tmp_path):
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("name", "Visitor road +13125550123"),
-        ("name", "Frontage (312) 555-0123"),
         ("highway", "service 312.555.0123"),
         ("highway", "inquiries@example.org"),
-        ("name", "North entrance HTTP://example.org/route"),
         ("highway", "alternate https://example.org"),
-        ("name", "Junction WWW.example.org/directions"),
-        ("name", "Dispatch 555-0198"),
-        ("name", "Office +44 20 7946 0958"),
         ("osmid", "x@example.org"),
         ("node_ids_json", '["312-555-0123"]'),
     ],
@@ -118,7 +112,7 @@ def test_geometry_export(road_inputs, tmp_path):
 def test_contact_in_preserved_field_fails_export(road_inputs, tmp_path, field, value):
     source, _ = road_inputs
     frame = gpd.read_parquet(source)
-    if field in {"name", "highway"}:
+    if field == "highway":
         tags = json.loads(frame.loc[1, "tags_json"])
         tags[field] = value
         frame.loc[1, "tags_json"] = json.dumps(tags)
@@ -132,6 +126,41 @@ def test_contact_in_preserved_field_fails_export(road_inputs, tmp_path, field, v
         str(failure.value) == f"Road contact-format matches: rows=1, columns: {field}=1"
     )
     assert not target.exists()
+
+
+@pytest.mark.parametrize(
+    "phone_or_url",
+    [
+        "Visitor road +13125550123",
+        "Frontage (312) 555-0123",
+        "North entrance HTTP://example.org/route",
+        "Junction WWW.example.org/directions",
+        "Dispatch 555-0198",
+        "Office +44 20 7946 0958",
+    ],
+)
+def test_only_contact_names_are_set_to_null(road_inputs, tmp_path, phone_or_url):
+    source, _ = road_inputs
+    original = pq.read_table(source)
+    tags = [json.loads(raw) for raw in original["tags_json"].to_pylist()]
+    tags[0]["name"] = phone_or_url
+    tags[2]["name"] = "dispatch@example.org"
+    updated = original.set_column(
+        original.schema.get_field_index("tags_json"),
+        "tags_json",
+        pa.array([json.dumps(t) for t in tags]),
+    )
+    pq.write_table(updated, source)
+    target = tmp_path / "roads.parquet"
+    repeat = tmp_path / "repeat.parquet"
+    for path in (target, repeat):
+        assert export_public_roads(source, path, sha(source)) == 2
+    assert target.read_bytes() == repeat.read_bytes()
+    public = pq.read_table(target)
+    for field in ["geometry", "osmid", "node_ids_json"]:
+        assert public[field].equals(original[field])
+    assert public["highway"].to_pylist() == [t["highway"] for t in tags]
+    assert public["name"].to_pylist() == [None, "", None]
 
 
 def test_ordinary_contact_and_website_street_names_are_preserved(road_inputs, tmp_path):
@@ -156,6 +185,11 @@ def test_contact_report_counts_rows_across_columns_and_batches(road_inputs, tmp_
         '{"highway": "http://example.com", "name": "WWW.example.org (212) 555-0147"}'
     )
     tags[-1] = '{"highway": "service", "name": "secret@example.org"}'
+    osmids = ["21"] * size
+    osmids[1] = osmids[-1] = "secret@example.org"
+    table = table.set_column(
+        table.schema.get_field_index("osmid"), "osmid", pa.array(osmids)
+    )
     table = table.set_column(
         table.schema.get_field_index("tags_json"), "tags_json", pa.array(tags)
     )
@@ -166,7 +200,7 @@ def test_contact_report_counts_rows_across_columns_and_batches(road_inputs, tmp_
         export_public_roads(source, target, sha(source))
     assert (
         str(failure.value)
-        == "Road contact-format matches: rows=2, columns: highway=1, name=2"
+        == "Road contact-format matches: rows=2, columns: osmid=2, highway=1"
     )
     assert not target.exists()
 
@@ -199,7 +233,14 @@ def test_every_speed_edge_matches_one_ordered_road_slice(road_inputs, tmp_path):
     assert len(edges) == 8  # Two bidirectional parallel roads and two split sections.
     junctions = {edge[k] for edge in edges for k in ("edge_u", "edge_v")}
     target = tmp_path / "roads" / source.name
-    export_public_roads(source, target, sha(source))
+    source_table = pq.read_table(source)
+    tags = source_table["tags_json"].to_pylist()
+    tags[0] = json.dumps({**json.loads(tags[0]), "name": "Road (312) 555-0123"})
+    source_table = source_table.set_column(
+        source_table.schema.get_field_index("tags_json"), "tags_json", pa.array(tags)
+    )
+    pq.write_table(source_table, source)
+    assert export_public_roads(source, target, sha(source)) == 1
 
     sections = defaultdict(list)
     streets = gpd.read_parquet(target)

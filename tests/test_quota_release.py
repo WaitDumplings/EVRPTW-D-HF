@@ -42,7 +42,7 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
         {
             "osmid": ["42"],
             "node_ids_json": ["[1, 2]"],
-            "tags_json": ['{"highway":"service","name":"Oak Road"}'],
+            "tags_json": ['{"highway":"service","name":"Oak 212-555-0123"}'],
         },
         geometry=[LineString([(-87.6, 41.8), (-87.61, 41.81)])],
         crs="EPSG:4326",
@@ -349,6 +349,8 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     assert not assembled.exists()
     write(ref.parent / "release.json", {"index_sha256": sha(ref)})
     qr.merge(merge)
+    (log,) = (assembled.parent / "delivery").glob(f"{assembled.name}-road-names-*.tsv")
+    assert log.read_text().splitlines() == ["city\tname_rows_cleared", f"{city}\t1"]
     df = pd.read_parquet(assembled / "index.parquet")
     pd.testing.assert_frame_equal(df, shrows)
     assert set(df.instance_id) == {rows[0]["instance_id"], supplemental_id}
