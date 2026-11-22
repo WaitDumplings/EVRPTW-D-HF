@@ -12,11 +12,12 @@ import pyarrow.parquet as pq
 
 # Keep bare decimal OSM identifiers distinct from formatted telephone numbers.
 _CONTACT_PATTERN = (
-    r"website|contact|"
+    r"\b(?:https?://|www\.)[^\s./,;:]+|"
     r"[a-z0-9.!#$%&'*+/=?^_{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}|"
-    r"(?:^|[^0-9])(?:\+1[ .-]?[0-9]{10}|(?:\+?1[ .-]?)?"
+    r"(?:^|[^0-9])(?:\+[1-9](?:[ .-]?[0-9]){7,14}|(?:\+?1[ .-]?)?"
     r"(?:\([0-9]{3}\)[ .-]?[0-9]{3}[ .-]?[0-9]{4}|"
-    r"[0-9]{3}[ .-][0-9]{3}[ .-]?[0-9]{4}|[0-9]{6}[ .-][0-9]{4}))"
+    r"[0-9]{3}[ .-][0-9]{3}[ .-]?[0-9]{4}|[0-9]{6}[ .-][0-9]{4}|"
+    r"[0-9]{3}[ .-][0-9]{4}))"
     r"(?:$|[^0-9])"
 )
 
@@ -60,6 +61,10 @@ def export_public_roads(source, target, expected_sha256):
                     pending, schema, compression="zstd", store_schema=False
                 ) as writer:
                     writer.add_key_value_metadata(metadata)
+                    column_counts = dict.fromkeys(
+                        ("osmid", "node_ids_json", "highway", "name"), 0
+                    )
+                    matched_rows = 0
                     for batch in roads.iter_batches(
                         batch_size=32_768,
                         columns=[*keep, "tags_json"],
@@ -74,16 +79,24 @@ def export_public_roads(source, target, expected_sha256):
                         fields.append(pa.array(highways, pa.string()))
                         fields.append(pa.array(names, pa.string()))
                         public = pa.RecordBatch.from_arrays(fields, schema=schema)
-                        for name in ("osmid", "node_ids_json", "highway", "name"):
+                        row_matches = pa.scalar(False)
+                        for name in column_counts:
                             hits = pc.match_substring_regex(
                                 public.column(name), _CONTACT_PATTERN, ignore_case=True
                             )
-                            if pc.any(hits).as_py():
-                                raise ValueError(
-                                    f"Contact text in public road column {name}"
-                                )
-                        writer.write_batch(public)
+                            column_counts[name] += pc.sum(hits).as_py() or 0
+                            row_matches = pc.or_kleene(row_matches, hits)
+                        matched_rows += pc.sum(row_matches).as_py() or 0
+                        if not matched_rows:
+                            writer.write_batch(public)
 
+                if matched_rows:
+                    columns = ", ".join(
+                        f"{k}={v}" for k, v in column_counts.items() if v
+                    )
+                    raise ValueError(
+                        f"Road contact-format matches: rows={matched_rows}, columns: {columns}"
+                    )
                 # Both the digest and the export use the same open inode.
                 after = os.fstat(stream.fileno())
                 if (before.st_size, before.st_mtime_ns) != (

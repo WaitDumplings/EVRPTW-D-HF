@@ -82,7 +82,7 @@ def test_geometry_export(road_inputs, tmp_path):
     assert set(geo) == {"version", "primary_column", "columns"}
     assert set(geo["columns"]["geometry"]) == {"encoding", "geometry_types", "crs"}
     contact = re.compile(
-        r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|website|contact|"
+        r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\b(?:https?://|www\.)\S+|"
         r"(?<!\d)(?:\+1[ .-]?)?(?:\(\d{3}\)[ .-]?|\d{3}[ .-])\d{3}[ .-]\d{4}(?!\d)",
         re.IGNORECASE,
     )
@@ -106,8 +106,11 @@ def test_geometry_export(road_inputs, tmp_path):
         ("name", "Frontage (312) 555-0123"),
         ("highway", "service 312.555.0123"),
         ("highway", "inquiries@example.org"),
-        ("name", "WeBsItE records"),
-        ("highway", "ConTact:phone"),
+        ("name", "North entrance HTTP://example.org/route"),
+        ("highway", "alternate https://example.org"),
+        ("name", "Junction WWW.example.org/directions"),
+        ("name", "Dispatch 555-0198"),
+        ("name", "Office +44 20 7946 0958"),
         ("osmid", "x@example.org"),
         ("node_ids_json", '["312-555-0123"]'),
     ],
@@ -123,8 +126,48 @@ def test_contact_in_preserved_field_fails_export(road_inputs, tmp_path, field, v
         frame.loc[1, field] = value
     frame.to_parquet(source, index=False)
     target = tmp_path / "roads" / source.name
-    with pytest.raises(ValueError, match="Contact text in public road column " + field):
+    with pytest.raises(ValueError) as failure:
         export_public_roads(source, target, sha(source))
+    assert (
+        str(failure.value) == f"Road contact-format matches: rows=1, columns: {field}=1"
+    )
+    assert not target.exists()
+
+
+def test_ordinary_contact_and_website_street_names_are_preserved(road_inputs, tmp_path):
+    source, _ = road_inputs
+    frame = gpd.read_parquet(source)
+    names = ["Contact Road", "Old Website Drive", "Contact Junction"]
+    for index, name in enumerate(names):
+        tags = json.loads(frame.loc[index, "tags_json"])
+        frame.loc[index, "tags_json"] = json.dumps({**tags, "name": name})
+    frame.to_parquet(source, index=False)
+    target = tmp_path / "roads" / source.name
+    export_public_roads(source, target, sha(source))
+    assert pq.read_table(target, columns=["name"])["name"].to_pylist() == names
+
+
+def test_contact_report_counts_rows_across_columns_and_batches(road_inputs, tmp_path):
+    source, _ = road_inputs
+    size = 32_769  # The last input row is in the second export batch.
+    table = pq.read_table(source).take(pa.array([0] * size))
+    tags = ['{"highway": "residential"}'] * size
+    tags[1] = (
+        '{"highway": "http://example.com", "name": "WWW.example.org (212) 555-0147"}'
+    )
+    tags[-1] = '{"highway": "service", "name": "secret@example.org"}'
+    table = table.set_column(
+        table.schema.get_field_index("tags_json"), "tags_json", pa.array(tags)
+    )
+    pq.write_table(table, source)
+
+    target = tmp_path / "roads" / source.name
+    with pytest.raises(ValueError) as failure:
+        export_public_roads(source, target, sha(source))
+    assert (
+        str(failure.value)
+        == "Road contact-format matches: rows=2, columns: highway=1, name=2"
+    )
     assert not target.exists()
 
 

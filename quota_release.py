@@ -893,6 +893,21 @@ def verify_release_paths(root, cities, instance_paths):
     )
 
 
+def release_contract(catalogs):
+    """Collect the common contract that will be written to the public release."""
+    public = {}
+    for city, (_, meta, _) in catalogs.items():
+        contract = meta["contract"]
+        for key in CONTRACT_FIELDS:
+            require(key in contract, f"Missing release contract field {key}: {city}")
+            require(
+                key not in public or public[key] == contract[key],
+                f"Different release contract field {key}: {city}",
+            )
+            public[key] = contract[key]
+    return public
+
+
 def merge(args):
     catalogs = city_catalogs(args.shards)
     require(
@@ -903,6 +918,7 @@ def merge(args):
     )
     accepted_roots = getattr(args, "accepted_shards", None)
     require(accepted_roots, "Supply --accepted-shards for the public merge")
+    public_contract = release_contract(catalogs)
     accepted = city_catalogs(accepted_roots)
     stable = [k for k in HF_COLUMNS if k not in ("bytes", "sha256", "content_sha256")]
     for city, (_, meta, df) in catalogs.items():
@@ -977,15 +993,14 @@ def merge(args):
         shutil.copyfile(reference, index_path)
         require(sha(index_path) == index_sha, "Reference index changed while copying")
         for name in RELEASE_DOCUMENTS:
-            shutil.copyfile(PROJECT / name, stage / name)
-        contract = next(iter(catalogs.values()))[1]["contract"]
+            shutil.copyfile(PROJECT / "dataset_card" / name, stage / name)
         write(
             stage / "release.json",
             {
                 "layout": LAYOUT,
                 "instances": len(data),
                 "instance_schema": HF_FORMAT,
-                "contract": {key: contract[key] for key in CONTRACT_FIELDS},
+                "contract": public_contract,
                 "cities": {
                     city: meta["binding"] for city, (_, meta, _) in catalogs.items()
                 },

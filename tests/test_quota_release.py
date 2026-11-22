@@ -434,7 +434,9 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     assert {key: metadata[key] for key in expected} == expected
     for name in ("README.md", "LICENSE.md", "NOTICE.md"):
         content = (assembled / name).read_text()
-        assert (qr.PROJECT / name).read_bytes() == (assembled / name).read_bytes()
+        assert (qr.PROJECT / "dataset_card" / name).read_bytes() == (
+            assembled / name
+        ).read_bytes()
         for forbidden in (
             "config/",
             "parameters/",
@@ -446,6 +448,16 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
             "github.com/WaitDumplings",
         ):
             assert forbidden not in content, name
+    for phrase in ("paper", "accompanying", "as described with the code"):
+        assert phrase not in card.casefold()
+    column_table = card.split("### Index columns\n", 1)[1].split("\n## ", 1)[0]
+    entries = [
+        row.strip("|").split("|")
+        for row in column_table.splitlines()
+        if row.startswith("| `")
+    ]
+    assert [col.strip().strip("`") for col, _ in entries] == list(qr.HF_COLUMNS)
+    assert all(0 < len(meaning.split()) <= 15 for _, meaning in entries)
     # City and method artifacts in the public root contain no Stage 2 draw records.
     private_fields = (
         "original_capacity_rejections",
@@ -589,3 +601,59 @@ def test_fixed_depot_rejection_tries_next_depot_on_same_day(
         t["split"],
         t["n"],
     ) == ("D2", "B2", "D2", task["date"], "train", 100)
+
+
+def test_repository_documents_preserve_f8fffc4():
+    # Fixed digests also work when testing an exported source tree without .git.
+    assert (
+        sha(qr.PROJECT / "README.md")
+        == "3bca7ca5a872b7ff6042a66c85052a765d0d63044b8df040d0aeade924591575"
+    )
+    assert (
+        sha(qr.PROJECT / "NOTICE.md")
+        == "eeaca04361529bf7c65896fbf4e8b9549b465989fe361bf14588a465ec0708d9"
+    )
+    assert not (qr.PROJECT / "LICENSE.md").exists()
+
+
+@pytest.mark.parametrize("key", qr.CONTRACT_FIELDS)
+@pytest.mark.parametrize("problem", ["missing", "different"])
+@pytest.mark.parametrize("check_only", [True, False])
+def test_merge_rejects_invalid_release_contract_before_install(
+    tmp_path, monkeypatch, key, problem, check_only
+):
+    contract = dict(
+        version="v1",
+        code_sha256="a" * 64,
+        stage1_engine_sha256="b" * 64,
+        calendar_start="2026-11-02",
+        calendar_days=28,
+    )
+    changed = contract.copy()
+    if problem == "missing":
+        del changed[key]
+    else:
+        changed[key] = 29 if key == "calendar_days" else "changed"
+    catalogs = {
+        city: (None, {"contract": values, "instance_schema": HF_FORMAT}, None)
+        for city, values in [("chicago", contract), ("houston", changed)]
+    }
+    monkeypatch.setattr(qr, "city_catalogs", lambda roots: catalogs)
+    monkeypatch.setattr(
+        qr,
+        "install_city_environment",
+        lambda *args: pytest.fail("unexpected file installation"),
+    )
+    target = tmp_path / "release"
+    with pytest.raises(
+        ValueError, match=f"{problem.title()} release contract field {key}: houston"
+    ):
+        qr.merge(
+            SimpleNamespace(
+                shards=["shard"],
+                accepted_shards=["accepted"],
+                check_only=check_only,
+                out=target,
+            )
+        )
+    assert not target.exists()
