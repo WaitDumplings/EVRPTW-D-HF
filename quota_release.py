@@ -906,7 +906,8 @@ def merge(args):
         (stage / "config").mkdir()
         for name in HF_CONFIG:
             shutil.copyfile(CONFIG / name, stage / "config" / name)
-        shutil.copyfile(PROJECT / "NOTICE.md", stage / "NOTICE.md")
+        for name in ("LICENSE.md", "NOTICE.md"):
+            shutil.copyfile(PROJECT / name, stage / name)
         (stage / "docs").mkdir()
         shutil.copyfile(
             PROJECT / "docs/SOURCES.zh-CN.md", stage / "docs/SOURCES.zh-CN.md"
@@ -937,7 +938,14 @@ def merge(args):
             },
         )
         (stage / "README.md").write_text(
-            "---\nconfigs:\n- config_name: instances\n  data_files:\n  - split: catalog\n    path: index.parquet\n---\n"
+            "---\nconfigs:\n- config_name: instances\n  data_files:\n  - split: catalog\n    path: index.parquet\n"
+            "license: other\n"
+            "license_name: evrptw-d-mixed\n"
+            "license_link: LICENSE.md\n"
+            "pretty_name: EVRPTW-D\n"
+            "language: [en]\n"
+            "size_categories: [10K<n<100K]\n"
+            "tags: [vehicle-routing, evrptw, vrptw, cvrp, combinatorial-optimization, road-network]\n---\n"
             f"# EVRPTW-D\n\n{len(data):,} accepted tasks in {len(catalogs)} cities. Filter index.parquet by city, split and n. "
             "Each instance file provides the same depot, customers and realized demands for the CVRP, VRPTW and EVRPTW views. "
             "Download the file in the index row's `path`. It contains ordered nodes, vehicle settings and four directed road matrices. "
@@ -945,6 +953,10 @@ def merge(args):
             "R is the target candidate-to-customer ratio. M is the realized candidate count. "
             "Vehicle and generator profiles are in config/, and city calibrations in parameters/cities/. "
             "See the [generator and data credits](https://github.com/WaitDumplings/EVRPTW-D-HF).\n"
+            "\n## License\n\n"
+            "Mixed license. OpenStreetMap-derived road networks, travel matrices and location coordinates are under ODbL 1.0. "
+            "Order attributes, instance composition, the catalog and documentation are under CC BY-NC 4.0. "
+            "A complete instance may be used for non-commercial purposes only. See [LICENSE.md](LICENSE.md).\n"
         )
         stage.rename(dest)
     print(dest)

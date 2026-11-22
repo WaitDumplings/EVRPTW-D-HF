@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+import yaml
 from test_solver_parquet import example
 
 import export_output
@@ -304,6 +305,52 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
         SimpleNamespace(
             shards=[shard], accepted_shards=[accepted], check_only=False, out=assembled
         )
+    )
+    card = (assembled / "README.md").read_text()
+    assert card.startswith("---\n")
+    header, body = card.removeprefix("---\n").split("\n---\n", 1)
+    metadata = yaml.safe_load(header)
+    expected = {
+        "configs": [
+            {
+                "config_name": "instances",
+                "data_files": [{"split": "catalog", "path": "index.parquet"}],
+            }
+        ],
+        "license": "other",
+        "license_name": "evrptw-d-mixed",
+        "license_link": "LICENSE.md",
+        "pretty_name": "EVRPTW-D",
+        "language": ["en"],
+        "size_categories": ["10K<n<100K"],
+        "tags": [
+            "vehicle-routing",
+            "evrptw",
+            "vrptw",
+            "cvrp",
+            "combinatorial-optimization",
+            "road-network",
+        ],
+    }
+    assert {key: metadata[key] for key in expected} == expected
+    for name in ("LICENSE.md", "NOTICE.md"):
+        assert (assembled / name).read_bytes() == (qr.PROJECT / name).read_bytes()
+    notice = (assembled / "NOTICE.md").read_text()
+    assert (
+        "The project owner has not assigned a new code license in this checkout."
+        not in notice
+    )
+    assert "See LICENSE.md for the terms that apply to each component." in notice
+    original, license_section = body.split("\n\n## License\n", 1)
+    assert (
+        "[generator and data credits](https://github.com/WaitDumplings/EVRPTW-D-HF)"
+        in original
+    )
+    assert license_section.strip() == (
+        "Mixed license. OpenStreetMap-derived road networks, travel matrices and location "
+        "coordinates are under ODbL 1.0. Order attributes, instance composition, the catalog "
+        "and documentation are under CC BY-NC 4.0. A complete instance may be used for "
+        "non-commercial purposes only. See [LICENSE.md](LICENSE.md)."
     )
     # City and method artifacts in the public root contain no Stage 2 draw records.
     private_fields = (
