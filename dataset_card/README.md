@@ -35,7 +35,7 @@ Each level keeps everything from the level before it. All three minimize total r
 
 ## How the data was built
 
-Each city environment starts from the OpenStreetMap road network, turned into a directed graph with weekday and weekend travel speeds. Candidate customer locations are representative points of building footprints, with structure records used to identify residential buildings and unit counts. Depot candidates are facilities tagged as warehouses or logistics offices in OpenStreetMap. Charging stations come from the public AFDC station and equipment lists, filtered for access and vehicle compatibility.
+Each city environment starts from the OpenStreetMap road network, turned into a directed graph with weekday and weekend travel speeds. Candidate customer locations are representative points of building footprints, with structure records used to identify residential buildings and unit counts. Depot candidates are facilities tagged in OpenStreetMap as warehouses, logistics offices or similar distribution sites such as postal depots. Charging stations come from the public AFDC station and equipment lists, filtered for access and vehicle compatibility.
 
 An instance fixes a city, a service date and a depot, then samples customers from the candidate locations around it and selects charging stations. Demands, service times and time windows follow an order model built on the Amazon Last Mile Routing Research Challenge dataset. Travel distances and times between all nodes are computed on the frozen road network. Instances are sampled subject to customer availability and a common construction protocol.
 
