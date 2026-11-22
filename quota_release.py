@@ -23,6 +23,8 @@ from instance_file import (
     read_portable,
     write_instance,
 )
+from public_city import CITY_FILES, LAYOUT, ROAD_FILE, verify_public_city
+from public_roads import export_public_roads
 from solver_parquet import HF_INFO_FIELDS, source_nodes_and_info
 from stage2.common import (
     BUDGET,
@@ -97,15 +99,13 @@ HF_COLUMNS = (
     "content_sha256",
     "solver_input_sha256",
 )
-HF_CONFIG = (
-    "amazon_solver_fields.json",
-    "candidate_ratio.csv",
-    "customer_profile.json",
-    "manifest.json",
-    "order_profile.json",
-    "public_sources.json",
-    "stage1_method.json",
-    "vehicle.json",
+RELEASE_DOCUMENTS = ("README.md", "LICENSE.md", "NOTICE.md")
+CONTRACT_FIELDS = (
+    "version",
+    "code_sha256",
+    "stage1_engine_sha256",
+    "calendar_start",
+    "calendar_days",
 )
 
 
@@ -716,13 +716,42 @@ def city_assets(source, city, meta):
     return files
 
 
-def write_hf_city(source, dest, city, meta, df, *, final):
-    for path, expected in city_assets(source, city, meta).items():
-        rel = Path(path)
-        if final and rel.parts[0] == "reports":
-            rel = Path("parameters/cities") / city / rel.name
-        install_asset(source / path, dest / rel, expected)
+def install_city_environment(source, dest, city, meta):
+    # city_assets verifies the complete manifest and its accepted binding.
+    # Assets omitted from the public layout still require their byte checks.
+    assets = city_assets(source, city, meta)
+    base = Path("CLE") / city
+    shared_sources = {
+        (base / name).as_posix(): name for name in CITY_FILES if name != ROAD_FILE
+    }
+    road_source = (base / "private_sources/osm_ways.parquet").as_posix()
+    require(
+        shared_sources.keys() <= assets.keys() and road_source in assets,
+        f"Incomplete city environment: {city}",
+    )
+    city_dir = dest / "cities" / city
+    records = {}
+    for path, expected in assets.items():
+        src = source / path
+        if path == road_source:
+            road = city_dir / ROAD_FILE
+            export_public_roads(src, road, expected)
+            records[ROAD_FILE] = {
+                "path": road.relative_to(dest).as_posix(),
+                "bytes": road.stat().st_size,
+                "sha256": sha(road),
+            }
+        elif path in shared_sources:
+            name = shared_sources[path]
+            target = city_dir / name
+            install_asset(src, target, expected)
+            records[name] = {"bytes": target.stat().st_size, "sha256": expected}
+        else:
+            require(sha(src) == expected, f"Checksum mismatch: {src}")
+    return records
 
+
+def write_hf_instances(source, dest, meta, df):
     result = df.loc[:, HF_COLUMNS].copy()
     projected = meta.get("instance_schema") == HF_FORMAT
     for row in df.itertuples():
@@ -784,7 +813,9 @@ def project(args):
                 previous.get("sealed_index_sha256") == meta["index_sha256"],
                 f"Different sealed source for existing shard: {city}",
             )
-        frame = write_hf_city(source, dest, city, meta, df, final=False)
+        for path, expected in city_assets(source, city, meta).items():
+            install_asset(source / path, dest / path, expected)
+        frame = write_hf_instances(source, dest, meta, df)
         validate_rows(city, frame, HF_COLUMNS)
         parent = target.parent
         parent.mkdir(exist_ok=True)
@@ -839,34 +870,56 @@ def city_catalogs(shards):
     return catalogs
 
 
+def verify_release_paths(root, cities, instance_paths):
+    expected = set(instance_paths) | {
+        *RELEASE_DOCUMENTS,
+        "index.parquet",
+        "release.json",
+    }
+    expected.update(f"cities/{city}/{name}" for city in cities for name in CITY_FILES)
+    directories = {parent for name in expected for parent in Path(name).parents}
+    actual = set()
+    for path in root.rglob("*"):
+        rel = path.relative_to(root)
+        if path.is_symlink() or (path.is_dir() and rel not in directories):
+            raise ValueError(f"Unexpected release path: {rel}")
+        if path.is_file():
+            actual.add(rel.as_posix())
+        elif not path.is_dir():
+            raise ValueError(f"Unexpected release path: {rel}")
+    require(
+        actual == expected,
+        f"Release file set differs: missing={sorted(expected - actual)}, extra={sorted(actual - expected)}",
+    )
+
+
 def merge(args):
     catalogs = city_catalogs(args.shards)
+    require(
+        all(
+            meta.get("instance_schema") == HF_FORMAT for _, meta, _ in catalogs.values()
+        ),
+        "Expected v2 public shards",
+    )
     accepted_roots = getattr(args, "accepted_shards", None)
-    if not args.check_only and any(
-        m.get("instance_schema") == HF_FORMAT for _, m, _ in catalogs.values()
-    ):
-        require(accepted_roots, "Supply --accepted-shards for the final public merge")
-    if accepted_roots:
-        accepted = city_catalogs(accepted_roots)
-        stable = [
-            k for k in HF_COLUMNS if k not in ("bytes", "sha256", "content_sha256")
-        ]
-        for city, (_, meta, df) in catalogs.items():
-            _, original, old = accepted[city]
-            require(
-                meta.get("instance_schema") == HF_FORMAT
-                and original.get("instance_schema", FORMAT) == FORMAT
-                and meta["sealed_index_sha256"] == original["index_sha256"]
-                and all(
-                    meta[k] == original[k] for k in ("contract", "binding", "files")
-                )
-                and df[stable]
-                .set_index("instance_id")
-                .sort_index()
-                .equals(old[stable].set_index("instance_id").sort_index()),
-                f"Public shard differs from accepted panel: {city}",
-            )
-    data = pd.concat([catalogs[city][2] for city in CITIES], ignore_index=True)
+    require(accepted_roots, "Supply --accepted-shards for the public merge")
+    accepted = city_catalogs(accepted_roots)
+    stable = [k for k in HF_COLUMNS if k not in ("bytes", "sha256", "content_sha256")]
+    for city, (_, meta, df) in catalogs.items():
+        _, original, old = accepted[city]
+        require(
+            original.get("instance_schema", FORMAT) == FORMAT
+            and meta["sealed_index_sha256"] == original["index_sha256"]
+            and all(meta[k] == original[k] for k in ("contract", "binding", "files"))
+            and df[stable]
+            .set_index("instance_id")
+            .sort_index()
+            .equals(old[stable].set_index("instance_id").sort_index()),
+            f"Public shard differs from accepted panel: {city}",
+        )
+    data = pd.concat(
+        [catalogs[city][2] for city in CITIES], ignore_index=True
+    ).sort_values(["city", "split", "n", "instance_id"], ignore_index=True)
     require(
         len(data) == sum(sum(quotas(city).values()) for city in CITIES)
         and data.instance_id.is_unique
@@ -882,6 +935,22 @@ def merge(args):
         ),
         "Different generation configurations",
     )
+    # The shards contain per-city catalogs. The existing global Parquet is the
+    # source of bytes for the unchanged index, including its encoding and metadata.
+    reference = getattr(args, "reference_index", None)
+    index_sha = None
+    if reference is not None:
+        index_sha = sha(reference)
+        previous_release = reference.parent / "release.json"
+        if previous_release.is_file():
+            require(
+                read(previous_release)["index_sha256"] == index_sha,
+                "Reference index differs from its release manifest",
+            )
+        require(
+            pd.read_parquet(reference).reset_index(drop=True).equals(data),
+            "Reference index differs from accepted public shards",
+        )
     if args.check_only:
         print(
             f"{len(catalogs)} cities, {len(data)} accepted, {data.bytes.sum():,} instance bytes"
@@ -891,73 +960,42 @@ def merge(args):
         args.out is not None and not args.out.exists(),
         "Choose an unused release directory",
     )
+    require(
+        reference is not None,
+        "Supply --reference-index to preserve the public index bytes",
+    )
     dest = args.out.resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=dest.parent, prefix=".quota-") as tmp:
         stage = Path(tmp) / "data"
         stage.mkdir()
-        frames = [
-            write_hf_city(root, stage, city, meta, df, final=True)
-            for city, (root, meta, df) in catalogs.items()
-        ]
-        data = pd.concat(frames, ignore_index=True).sort_values(
-            ["city", "split", "n", "instance_id"], ignore_index=True
-        )
-        (stage / "config").mkdir()
-        for name in HF_CONFIG:
-            shutil.copyfile(CONFIG / name, stage / "config" / name)
-        for name in ("LICENSE.md", "NOTICE.md"):
+        city_files = {}
+        for city, (root, meta, df) in catalogs.items():
+            city_files[city] = install_city_environment(root, stage, city, meta)
+            write_hf_instances(root, stage, meta, df)
+        index_path = stage / "index.parquet"
+        shutil.copyfile(reference, index_path)
+        require(sha(index_path) == index_sha, "Reference index changed while copying")
+        for name in RELEASE_DOCUMENTS:
             shutil.copyfile(PROJECT / name, stage / name)
-        (stage / "docs").mkdir()
-        shutil.copyfile(
-            PROJECT / "docs/SOURCES.zh-CN.md", stage / "docs/SOURCES.zh-CN.md"
-        )
-        data.to_parquet(stage / "index.parquet", index=False)
+        contract = next(iter(catalogs.values()))[1]["contract"]
         write(
             stage / "release.json",
             {
+                "layout": LAYOUT,
                 "instances": len(data),
                 "instance_schema": HF_FORMAT,
-                "contract": {
-                    k: v
-                    for k, v in next(iter(catalogs.values()))[1]["contract"].items()
-                    if k
-                    in (
-                        "version",
-                        "code_sha256",
-                        "stage1_engine_sha256",
-                        "calendar_start",
-                        "calendar_days",
-                    )
+                "contract": {key: contract[key] for key in CONTRACT_FIELDS},
+                "cities": {
+                    city: meta["binding"] for city, (_, meta, _) in catalogs.items()
                 },
-                "config_sha256": {
-                    name: sha(stage / "config" / name) for name in HF_CONFIG
-                },
-                "cities": {c: m["binding"] for c, (_, m, _) in catalogs.items()},
-                "index_sha256": sha(stage / "index.parquet"),
+                "city_files": city_files,
+                "index_sha256": index_sha,
             },
         )
-        (stage / "README.md").write_text(
-            "---\nconfigs:\n- config_name: instances\n  data_files:\n  - split: catalog\n    path: index.parquet\n"
-            "license: other\n"
-            "license_name: evrptw-d-mixed\n"
-            "license_link: LICENSE.md\n"
-            "pretty_name: EVRPTW-D\n"
-            "language: [en]\n"
-            "size_categories: [10K<n<100K]\n"
-            "tags: [vehicle-routing, evrptw, vrptw, cvrp, combinatorial-optimization, road-network]\n---\n"
-            f"# EVRPTW-D\n\n{len(data):,} accepted tasks in {len(catalogs)} cities. Filter index.parquet by city, split and n. "
-            "Each instance file provides the same depot, customers and realized demands for the CVRP, VRPTW and EVRPTW views. "
-            "Download the file in the index row's `path`. It contains ordered nodes, vehicle settings and four directed road matrices. "
-            "Instances are sampled subject to customer availability and a common construction protocol. "
-            "R is the target candidate-to-customer ratio. M is the realized candidate count. "
-            "Vehicle and generator profiles are in config/, and city calibrations in parameters/cities/. "
-            "See the [generator and data credits](https://github.com/WaitDumplings/EVRPTW-D-HF).\n"
-            "\n## License\n\n"
-            "Mixed license. OpenStreetMap-derived road networks, travel matrices and location coordinates are under ODbL 1.0. "
-            "Order attributes, instance composition, the catalog and documentation are under CC BY-NC 4.0. "
-            "A complete instance may be used for non-commercial purposes only. See [LICENSE.md](LICENSE.md).\n"
-        )
+        for city in catalogs:
+            verify_public_city(stage, city)
+        verify_release_paths(stage, catalogs, data.path)
         stage.rename(dest)
     print(dest)
 
@@ -999,6 +1037,11 @@ if __name__ == "__main__":
         help="Cross-check public shards against accepted v1 manifest roots",
     )
     p.add_argument("--out", type=Path)
+    p.add_argument(
+        "--reference-index",
+        type=Path,
+        help="Existing public index.parquet to validate and preserve byte-for-byte (required with --out)",
+    )
     p.add_argument("--check-only", action="store_true")
     args = parser.parse_args()
     if args.command in {"fill", "seal"}:

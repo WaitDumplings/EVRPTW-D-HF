@@ -21,6 +21,7 @@ from instance_file import (
     unpack,
     write_instance,
 )
+from public_city import verify_public_city
 from solver_parquet import (
     HF_INFO_FIELDS,
     PROBLEMS,
@@ -290,6 +291,14 @@ def publish_city_instances(work, output, city):
     ]
 
 
+def _verify_delivered_city(output, city, expected, *, full=True):
+    manifest = output / "release.json"
+    if (output / "cities").exists() or (manifest.is_file() and "layout" in read(manifest)):
+        return output / "cities" / city, verify_public_city(output, city, expected)
+    base = output / "CLE" / city
+    return base, verify_city(base, city, expected=expected, full=full)
+
+
 def plot_instance(file, output, dest):
     import pyarrow.csv as arrow_csv
     import pyarrow.parquet as pq
@@ -299,8 +308,7 @@ def plot_instance(file, output, dest):
 
     payload = file_header(file)["payload"]
     info = payload["instance"]
-    base = output / "CLE" / info["city"]
-    verify_city(base, info["city"], expected=payload["cle"], full=False)
+    base, _ = _verify_delivered_city(output, info["city"], payload["cle"], full=False)
     shared = base / "shared"
     boundary = shared / "boundary.geojson"
     if sha(boundary) != read(shared / "shared.json")["files"]["boundary.geojson"]:
@@ -413,7 +421,8 @@ def main():
         expected = (
             file_header(args.instance)["payload"]["cle"] if args.instance else None
         )
-        print(verify_city(args.out / "CLE" / args.city, args.city, expected))
+        _, binding = _verify_delivered_city(args.out, args.city, expected)
+        print(binding)
     elif args.command == "plot":
         print(plot_instance(args.file, args.out, args.dest))
     elif args.command == "verify-instance":

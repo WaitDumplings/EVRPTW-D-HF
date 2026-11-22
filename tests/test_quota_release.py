@@ -6,9 +6,11 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import geopandas as gpd
 import pandas as pd
 import pytest
 import yaml
+from shapely.geometry import LineString
 from test_solver_parquet import example
 
 import export_output
@@ -34,13 +36,27 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     cal, vintage = digest(declared), sha(ev / "inventory.json")
     cle = output / "CLE" / city
     write(cle / "roads.json", [1])
+    roads = cle / "private_sources/osm_ways.parquet"
+    roads.parent.mkdir()
+    gpd.GeoDataFrame(
+        {
+            "osmid": ["42"],
+            "node_ids_json": ["[1, 2]"],
+            "tags_json": ['{"highway":"service","name":"Oak Road"}'],
+        },
+        geometry=[LineString([(-87.6, 41.8), (-87.61, 41.81)])],
+        crs="EPSG:4326",
+    ).to_parquet(roads, index=False)
     manifest = cle / "cle_manifest.json"
     write(
         manifest,
         {
             "city_slug": city,
             "schema": "evrptw_building_first_cle_v1",
-            "files": {"roads.json": {"sha256": sha(cle / "roads.json")}},
+            "files": {
+                "roads.json": {"sha256": sha(cle / "roads.json")},
+                "private_sources/osm_ways.parquet": {"sha256": sha(roads)},
+            },
             "sources": {"inventory": {"sha256": vintage}},
         },
     )
@@ -60,13 +76,24 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     }
     write(cle / "public_authority.json", authority)
     shared = cle / "shared"
+    shared.mkdir()
+    for name in (
+        "access.parquet",
+        "boundary.geojson",
+        "endpoints.parquet",
+        "locations.parquet",
+        "rook.json",
+        "speeds.parquet",
+    ):
+        (shared / name).write_bytes(name.encode())
     write(
         shared / "shared.json",
         {
             "city": city,
             "calibration": cal,
             "vintage": vintage,
-            "files": {},
+            "schema": "evrptwd_shared_v1",
+            "files": {p.name: sha(p) for p in shared.iterdir()},
             "source": {
                 "cle": sha(manifest),
                 "cohort": sha(cle / "public_authority.json"),
@@ -79,7 +106,15 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     monkeypatch.setattr(qr, "QUOTA", {"train": {2: 2}})
     monkeypatch.setattr(qr, "BUDGET", {2: 1})
     monkeypatch.setattr(
-        qr, "city_contract", lambda c, p: {"resource_sha256": p["resource_sha256"]}
+        qr,
+        "city_contract",
+        lambda c, p: {
+            "version": p["version"],
+            "code_sha256": p["code_sha256"],
+            "calendar_start": "2026-11-02",
+            "calendar_days": 28,
+            "resource_sha256": p["resource_sha256"],
+        },
     )
     tasks = [
         {
@@ -265,22 +300,10 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     # A previously sealed city (including a legacy B shard) needs no private map.
     qr.seal(args, fill_capacity=True)
     assert len(calls) == success_at
-    dest = tmp_path / "release"
-    merge = SimpleNamespace(shards=[output], out=dest, check_only=True)
-    qr.merge(merge)
-    merge.check_only = False
-    qr.merge(merge)
-    df = pd.read_parquet(dest / "index.parquet")
-    assert set(df.instance_id) == {rows[0]["instance_id"], supplemental_id}
-    assert len(df) == 2 and all(not ("slot" in c or "retry" in c) for c in df.columns)
-    assert "seed" not in df and "original_capacity_rejections" not in read(
-        dest / "release.json"
-    )
-    assert (dest / "config/vehicle.json").is_file() and not (
-        dest / "config/release_panel.json"
-    ).exists()
-    assert not (dest / "_release").exists() and not (dest / "slots.parquet").exists()
-    assert "rejection" not in (dest / "README.md").read_text().lower()
+    with pytest.raises(ValueError, match="Expected v2 public shards"):
+        qr.merge(
+            SimpleNamespace(shards=[output], accepted_shards=[output], check_only=True)
+        )
     private, old = qr.read_city_index(output / "_release" / city, city)
     assert (
         private["original_capacity_rejections"][0]["count"] == 1
@@ -292,7 +315,6 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     qr.project(projection)  # same verified files and index on resume
     shmeta, shrows = qr.read_city_index(shard / "_release" / city, city)
     assert shmeta["sealed_index_sha256"] == private["index_sha256"]
-    pd.testing.assert_frame_equal(df, shrows)
     accepted = tmp_path / "accepted-manifests"
     for name in ("city.json", "index.parquet"):
         dst = accepted / "_release" / city / name
@@ -301,14 +323,91 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     assembled = tmp_path / "from-public"
     with pytest.raises(ValueError, match="Supply --accepted-shards"):
         qr.merge(SimpleNamespace(shards=[shard], check_only=False, out=assembled))
-    qr.merge(
-        SimpleNamespace(
-            shards=[shard], accepted_shards=[accepted], check_only=False, out=assembled
-        )
+    ref = tmp_path / "reference" / "index.parquet"
+    ref.parent.mkdir()
+    shrows.to_parquet(ref, compression="gzip", index=False)
+    merge = SimpleNamespace(
+        shards=[shard],
+        accepted_shards=[accepted],
+        check_only=True,
+        reference_index=ref,
+        out=assembled,
     )
+    qr.merge(merge)
+    assert not assembled.exists()
+    merge.check_only = False
+    shrows.iloc[::-1].to_parquet(ref, compression="gzip", index=False)
+    with pytest.raises(ValueError, match="Reference index differs"):
+        qr.merge(merge)
+    assert not assembled.exists()
+    shrows.to_parquet(ref, compression="gzip", index=False)
+    write(ref.parent / "release.json", {"index_sha256": "0" * 64})
+    with pytest.raises(
+        ValueError, match="Reference index differs from its release manifest"
+    ):
+        qr.merge(merge)
+    assert not assembled.exists()
+    write(ref.parent / "release.json", {"index_sha256": sha(ref)})
+    qr.merge(merge)
+    df = pd.read_parquet(assembled / "index.parquet")
+    pd.testing.assert_frame_equal(df, shrows)
+    assert set(df.instance_id) == {rows[0]["instance_id"], supplemental_id}
+    assert len(df) == 2 and "seed" not in df
+    assert not any("slot" in c or "retry" in c for c in df)
+    release = read(assembled / "release.json")
+    assert set(release) == {
+        "layout",
+        "instances",
+        "instance_schema",
+        "contract",
+        "cities",
+        "city_files",
+        "index_sha256",
+    }
+    assert release["layout"] == "evrptwd_public_two_part_v1"
+    assert set(release["contract"]) == {
+        "version",
+        "code_sha256",
+        "stage1_engine_sha256",
+        "calendar_start",
+        "calendar_days",
+    }
+    assert release["index_sha256"] == sha(ref) == sha(assembled / "index.parquet")
+    assert release["cities"][city] == binding
+    city_paths = {f"shared/{p.name}" for p in shared.iterdir()} | {
+        "roads/osm_ways.parquet"
+    }
+    assert set(release["city_files"][city]) == city_paths
+    expected = (
+        set(df.path)
+        | {f"cities/{city}/{p}" for p in city_paths}
+        | {
+            "release.json",
+            "index.parquet",
+            "README.md",
+            "LICENSE.md",
+            "NOTICE.md",
+        }
+    )
+    assert {
+        p.relative_to(assembled).as_posix() for p in assembled.rglob("*") if p.is_file()
+    } == expected
+    for name, record in release["city_files"][city].items():
+        asset = assembled / "cities" / city / name
+        assert (asset.stat().st_size, sha(asset)) == (record["bytes"], record["sha256"])
+    extra = assembled / "unexpected.txt"
+    extra.write_text("extra")
+    with pytest.raises(ValueError, match="Release file set differs"):
+        qr.verify_release_paths(assembled, [city], df.path)
+    extra.unlink()
+    hidden = assembled / "README.md"
+    hidden.rename(tmp_path / "saved-readme")
+    with pytest.raises(ValueError, match="Release file set differs"):
+        qr.verify_release_paths(assembled, [city], df.path)
+    (tmp_path / "saved-readme").rename(hidden)
     card = (assembled / "README.md").read_text()
     assert card.startswith("---\n")
-    header, body = card.removeprefix("---\n").split("\n---\n", 1)
+    header, _ = card.removeprefix("---\n").split("\n---\n", 1)
     metadata = yaml.safe_load(header)
     expected = {
         "configs": [
@@ -333,25 +432,20 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
         ],
     }
     assert {key: metadata[key] for key in expected} == expected
-    for name in ("LICENSE.md", "NOTICE.md"):
-        assert (assembled / name).read_bytes() == (qr.PROJECT / name).read_bytes()
-    notice = (assembled / "NOTICE.md").read_text()
-    assert (
-        "The project owner has not assigned a new code license in this checkout."
-        not in notice
-    )
-    assert "See LICENSE.md for the terms that apply to each component." in notice
-    original, license_section = body.split("\n\n## License\n", 1)
-    assert (
-        "[generator and data credits](https://github.com/WaitDumplings/EVRPTW-D-HF)"
-        in original
-    )
-    assert license_section.strip() == (
-        "Mixed license. OpenStreetMap-derived road networks, travel matrices and location "
-        "coordinates are under ODbL 1.0. Order attributes, instance composition, the catalog "
-        "and documentation are under CC BY-NC 4.0. A complete instance may be used for "
-        "non-commercial purposes only. See [LICENSE.md](LICENSE.md)."
-    )
+    for name in ("README.md", "LICENSE.md", "NOTICE.md"):
+        content = (assembled / name).read_text()
+        assert (qr.PROJECT / name).read_bytes() == (assembled / name).read_bytes()
+        for forbidden in (
+            "config/",
+            "parameters/",
+            "docs/",
+            "private_sources",
+            "CLE/",
+            "Stage 1",
+            "Stage 2",
+            "github.com/WaitDumplings",
+        ):
+            assert forbidden not in content, name
     # City and method artifacts in the public root contain no Stage 2 draw records.
     private_fields = (
         "original_capacity_rejections",
@@ -377,20 +471,36 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
     pd.testing.assert_frame_equal(df, pd.read_parquet(assembled / "index.parquet"))
     for row in df.itertuples():
         path = row.path
-        public = file_header(dest / path)
+        public = file_header(assembled / path)
         assert public["schema"] == HF_FORMAT
         assert set(public["payload"]["instance"]) == set(HF_INFO_FIELDS)
-        assert row.sha256 == sha(dest / path) == sha(shard / path)
+        assert row.sha256 == sha(assembled / path) == sha(shard / path)
         assert row.content_sha256 == public["content_sha256"]
         assert os.stat(shard / path).st_ino == os.stat(assembled / path).st_ino
         for view in PROBLEMS:
             _, before = read_portable(output / path, view)
-            _, after = read_portable(dest / path, view)
+            _, after = read_portable(assembled / path, view)
             assert before.nodes.equals(after.nodes)
             assert after.info == {k: before.info[k] for k in HF_INFO_FIELDS}
             assert set(after.tables()["instances"].column_names) == set(HF_INFO_FIELDS)
             for key in before.matrices:
                 assert before.matrices[key].tobytes() == after.matrices[key].tobytes()
+    # Omitted provenance must still be accepted before making a new release.
+    merge.out = tmp_path / "bad-release"
+    omitted = shard / "CLE" / city / "roads.json"
+    saved_bytes = omitted.read_bytes()
+    omitted.write_bytes(b"broken")
+    with pytest.raises(ValueError, match="Checksum mismatch"):
+        qr.merge(merge)
+    assert not merge.out.exists()
+    omitted.write_bytes(saved_bytes)
+    instance = shard / df.path.iloc[0]
+    saved_bytes = instance.read_bytes()
+    instance.write_bytes(b"broken")
+    with pytest.raises(ValueError, match="Checksum mismatch"):
+        qr.merge(merge)
+    assert not merge.out.exists()
+    instance.write_bytes(saved_bytes)
     # Linking public shards back to the accepted panel also checks every stable field.
     changed = shrows.copy()
     changed.loc[0, "R"] += 1
@@ -403,12 +513,6 @@ def test_certified_release_and_capacity_draw(tmp_path, monkeypatch):
         qr.merge(
             SimpleNamespace(shards=[shard], accepted_shards=[output], check_only=True)
         )
-    # A changed transfer must not leave a seemingly complete release.
-    (output / df.path.iloc[0]).write_bytes(b"broken")
-    merge.out = tmp_path / "bad-release"
-    with pytest.raises(ValueError, match="Checksum mismatch"):
-        qr.merge(merge)
-    assert not merge.out.exists()
 
 
 @pytest.mark.parametrize(

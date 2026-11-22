@@ -112,23 +112,23 @@ done
 # Bash；A、B、C、D 是汇总机上各个公开分片的实际绝对路径
 shards=("$A" "$B" "$C" "$D")
 accepted=("$ACCEPTED/A" "$ACCEPTED/B" "$ACCEPTED/C" "$ACCEPTED/D")
-python quota_release.py merge --shards "${shards[@]}" --accepted-shards "${accepted[@]}" --check-only
-python quota_release.py merge --shards "${shards[@]}" --accepted-shards "${accepted[@]}" --out "$RELEASE_DIR"
+# READY_DIR 为已有公开版本的只读目录
+index="$READY_DIR/index.parquet"
+python quota_release.py merge --shards "${shards[@]}" --accepted-shards "${accepted[@]}" --reference-index "$index" --check-only
+python quota_release.py merge --shards "${shards[@]}" --accepted-shards "${accepted[@]}" --reference-index "$index" --out "$RELEASE_DIR"
 ```
 
-预检将每例 ID、求解输入指纹、split、规模、CS 数及生成参数与原清单比对，检查各格配额与全局唯一性。正式合并核对到盘文件的 SHA-256，完成后原子创建 `RELEASE_DIR`。选择尚不存在的目标目录，与分片同盘可通过硬链接节省空间。仅将以下最终目录作为 Hugging Face dataset 根目录。
+预检将每例 ID、求解输入指纹、split、规模、CS 数及生成参数与原清单比对，检查各格配额与全局唯一性。参考索引须与全部公开分片的行、列和排序一致，正式合并逐字节保留该索引和 v2 实例。正式合并核对完整输入资产及输出文件的 SHA-256，完成后原子创建 `RELEASE_DIR`。选择尚不存在的目标目录，与分片同盘可通过硬链接节省空间。仅将以下最终目录作为 Hugging Face dataset 根目录。
 
 ```text
 EVRPTW-D-release/
   README.md                    # HF 默认配置 instances，catalog 中每行一个实例
+  LICENSE.md
   NOTICE.md
-  docs/SOURCES.zh-CN.md
-  release.json                 # 生成方法、公开格式、配置摘要、各城 CLE 绑定
-  index.parquet                # 17,400 行，按 city、split、n、instance_id 排序
-  config/vehicle.json          # 车型、容量、能耗、SOC、充电与班次
-  config/                      # 客户、订单和其他生成参数
-  parameters/cities/<city>/    # 城市来源与住宅参数
-  CLE/<city>/                  # 完整 Stage 1，含 shared/
+  release.json                 # 城市绑定、城市文件大小与哈希、公开索引哈希
+  index.parquet                # 原公开总索引
+  cities/<city>/shared/        # 原样交付的七份共享文件
+  cities/<city>/roads/osm_ways.parquet   # 道路几何、标识、highway 和 name
   instances/<city>/<split>/Cus<N>/<instance_id>.parquet
 ```
 
