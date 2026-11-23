@@ -64,7 +64,7 @@ import numpy as np
 import pyarrow.parquet as pq
 from huggingface_hub import hf_hub_download
 
-path = hf_hub_download("<REPO_ID>", "<path from index.parquet>", repo_type="dataset")
+path = hf_hub_download("MJayTang/EVRPTW-D", "<path from index.parquet>", repo_type="dataset")
 table = pq.read_table(path).sort_by("node_idx")
 meta = json.loads(table.schema.metadata[b"evrptwd.instance"])["payload"]
 D = np.array(table["shortest_distance_m"].to_pylist())  # D[i, j]: metres from node i to node j
